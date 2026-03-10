@@ -3,15 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fantasy Writer</title>
+    <title>Scripvia</title>
 
-    <!-- Google Fonts: Cinzel (display) + Crimson Pro (body) -->
-    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap" rel="stylesheet">
+    <!-- Fonts: Cormorant Garamond (display) + DM Sans (UI) -->
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;0,700;1,300;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 
     <!-- Quill Rich Text Editor -->
     <link href="https://cdn.quilljs.com/1.3.7/quill.snow.css" rel="stylesheet">
 
-    <!-- Our CSS -->
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
@@ -19,120 +18,131 @@
 <!-- ========== SIDEBAR ========== -->
 <aside class="sidebar" id="sidebar">
 
-    <!-- App Logo -->
     <div class="sidebar-header">
         <div class="logo">
-            <span class="logo-icon">⚔️</span>
-            <span class="logo-text">Lorewriter</span>
+            <svg class="logo-mark" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z" fill="currentColor" opacity="0.3"/>
+                <path d="M17 7l-5 5-5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <circle cx="12" cy="15" r="2" fill="currentColor"/>
+            </svg>
+            <span class="logo-text">Scripvia</span>
         </div>
-        <button class="sidebar-toggle" id="sidebarToggle" title="Toggle sidebar">&#9776;</button>
+        <button class="sidebar-toggle" id="sidebarToggle" title="Toggle sidebar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+        </button>
     </div>
 
-    <!-- New Project Button -->
     <div class="sidebar-actions">
-        <button class="btn-primary" id="newProjectBtn">+ New Project</button>
+        <button class="btn-primary" id="newProjectBtn">
+            <span class="btn-icon-inline">+</span> New Project
+        </button>
     </div>
 
-    <!-- Projects List -->
     <nav class="projects-nav">
-        <p class="nav-label">PROJECTS</p>
+        <p class="nav-label">Projects</p>
         <ul class="projects-list" id="projectsList">
-            <!-- Dynamically populated by JS -->
-            <li class="empty-state">No projects yet.<br>Create one above.</li>
+            <li class="empty-state">No projects yet.<br>Create one to begin.</li>
         </ul>
     </nav>
 
-    <!-- Documents List (shown when a project is selected) -->
     <nav class="documents-nav" id="documentsNav" style="display:none;">
         <div class="nav-label-row">
-            <p class="nav-label">CHAPTERS</p>
-            <button class="btn-icon" id="newDocBtn" title="New chapter">+</button>
+            <p class="nav-label">Documents</p>
+            <button class="btn-icon" id="newDocBtn" title="New document">+</button>
         </div>
-        <ul class="documents-list" id="documentsList">
-            <!-- Dynamically populated by JS -->
-        </ul>
+        <ul class="documents-list" id="documentsList"></ul>
     </nav>
 
-    <!-- Bottom controls -->
     <div class="sidebar-footer">
-        <button class="btn-ghost" id="darkModeToggle">🌙 Dark Mode</button>
-        <span class="version">v0.1.0</span>
+        <button class="btn-ghost-sm" id="darkModeToggle">
+            <span id="themeIcon">🌙</span>
+            <span id="themeLabel">Dark</span>
+        </button>
+        <span class="version">v0.1</span>
     </div>
 </aside>
 
-<!-- ========== MAIN EDITOR AREA ========== -->
+<!-- ========== MAIN EDITOR ========== -->
 <main class="editor-area" id="editorArea">
 
-    <!-- Top bar -->
     <header class="editor-header">
         <div class="doc-title-wrap">
-            <input 
-                type="text" 
-                id="docTitleInput" 
-                class="doc-title-input" 
-                placeholder="Untitled Chapter..."
+            <input
+                type="text"
+                id="docTitleInput"
+                class="doc-title-input"
+                placeholder="Untitled Document..."
                 disabled
             >
         </div>
         <div class="header-actions">
-            <span class="save-status" id="saveStatus">—</span>
+            <span class="save-status" id="saveStatus"></span>
             <button class="btn-ghost" id="exportPdfBtn" disabled>↓ PDF</button>
             <button class="btn-ghost" id="exportDocxBtn" disabled>↓ DOCX</button>
-            <button class="btn-accent" id="saveBtn" disabled>Save</button>
+            <button class="btn-save" id="saveBtn" disabled>Save</button>
         </div>
     </header>
 
-    <!-- Quill Editor -->
-    <div class="editor-wrapper">
+    <div class="editor-wrapper" id="editorWrapper">
         <div id="quillEditor"></div>
     </div>
 
-    <!-- Empty/Welcome State -->
+    <!-- Welcome Screen -->
     <div class="welcome-screen" id="welcomeScreen">
+        <div class="welcome-bg-orb orb1"></div>
+        <div class="welcome-bg-orb orb2"></div>
         <div class="welcome-content">
-            <div class="welcome-glyph">📖</div>
-            <h1 class="welcome-title">Lorewriter</h1>
-            <p class="welcome-sub">Your world. Your words. Your legend.</p>
-            <p class="welcome-hint">← Create a project to begin writing</p>
+            <div class="welcome-logo-large">Scripvia</div>
+            <p class="welcome-tagline">Write anything. Remember everything.</p>
+            <div class="welcome-chips">
+                <span class="chip">✦ Stories</span>
+                <span class="chip">✦ Scripts</span>
+                <span class="chip">✦ Journals</span>
+                <span class="chip">✦ Notes</span>
+                <span class="chip">✦ Worldbuilding</span>
+            </div>
+            <p class="welcome-hint">← Select or create a project to start writing</p>
         </div>
     </div>
 
 </main>
 
 <!-- ========== MODALS ========== -->
-
-<!-- New Project Modal -->
 <div class="modal-overlay" id="newProjectModal">
     <div class="modal">
-        <h2 class="modal-title">New Project</h2>
-        <label class="modal-label">Project Title</label>
-        <input type="text" class="modal-input" id="projectTitleInput" placeholder="e.g. Fire Clan Arc">
-        <label class="modal-label">Description (optional)</label>
-        <textarea class="modal-textarea" id="projectDescInput" placeholder="What's this story about?"></textarea>
+        <div class="modal-header">
+            <h2 class="modal-title">New Project</h2>
+            <button class="modal-close" id="cancelProjectBtn">×</button>
+        </div>
+        <label class="modal-label">Title</label>
+        <input type="text" class="modal-input" id="projectTitleInput" placeholder="e.g. Modern Love, The Last City...">
+        <label class="modal-label">Description <span class="optional">(optional)</span></label>
+        <textarea class="modal-textarea" id="projectDescInput" placeholder="What's this project about?"></textarea>
         <div class="modal-actions">
-            <button class="btn-ghost" id="cancelProjectBtn">Cancel</button>
-            <button class="btn-primary" id="confirmProjectBtn">Create Project</button>
+            <button class="btn-ghost" id="cancelProjectBtn2">Cancel</button>
+            <button class="btn-primary-sm" id="confirmProjectBtn">Create Project</button>
         </div>
     </div>
 </div>
 
-<!-- New Document Modal -->
 <div class="modal-overlay" id="newDocModal">
     <div class="modal">
-        <h2 class="modal-title">New Chapter</h2>
-        <label class="modal-label">Chapter Title</label>
-        <input type="text" class="modal-input" id="docTitleModalInput" placeholder="e.g. The Awakening">
+        <div class="modal-header">
+            <h2 class="modal-title">New Document</h2>
+            <button class="modal-close" id="cancelDocBtnX">×</button>
+        </div>
+        <label class="modal-label">Document Title</label>
+        <input type="text" class="modal-input" id="docTitleModalInput" placeholder="e.g. Chapter One, Scene 3, Notes...">
         <div class="modal-actions">
             <button class="btn-ghost" id="cancelDocBtn">Cancel</button>
-            <button class="btn-primary" id="confirmDocBtn">Create Chapter</button>
+            <button class="btn-primary-sm" id="confirmDocBtn">Create</button>
         </div>
     </div>
 </div>
 
-<!-- Quill JS -->
 <script src="https://cdn.quilljs.com/1.3.7/quill.min.js"></script>
-<!-- Our JS -->
 <script src="/static/js/main.js"></script>
-
 </body>
 </html>
