@@ -5,6 +5,10 @@
 let currentProjectId = null;
 let currentDocId = null;
 let quill = null;
+let autoSaveTimer = null;      // Holds the 30s interval
+let localBackupTimer = null;   // Holds the localStorage debounce timer
+let countdownTimer = null;     // Countdown display timer
+let secondsUntilSave = 30;     // Countdown counter
 
 // DOM refs
 const projectsList    = document.getElementById('projectsList');
@@ -44,7 +48,11 @@ function initQuill() {
         }
     });
 
-    quill.on('text-change', () => setSaveStatus('unsaved'));
+quill.on('text-change', () => {
+    setSaveStatus('unsaved');
+    saveToLocalStorage();      // Instantly backup to localStorage on every keystroke
+    resetCountdown();          // Reset the 30s countdown on activity
+});
 }
 
 // =============================================
@@ -164,11 +172,21 @@ async function openDocument(id) {
         currentDocId = id;
         docTitleInput.value = doc.title;
         docTitleInput.disabled = false;
+
+        // Load server content first
         quill.root.innerHTML = doc.content || '';
         quill.history.clear();
+
         showEditor();
-        setSaveStatus('saved');
         enableHeaderBtns(true);
+
+        // Check if there's a newer localStorage backup to restore
+        const restored = checkLocalStorageRestore(id, doc.content || '');
+        if (!restored) setSaveStatus('saved');
+
+        // Start the 30s auto-save cycle
+        startAutoSave();
+
         await loadDocuments(currentProjectId);
     } catch(e) { console.error('openDocument:', e); }
 }
@@ -182,6 +200,7 @@ async function saveDocument() {
             content: quill.root.innerHTML
         });
         setSaveStatus('saved');
+        clearLocalStorage(currentDocId); // Server has latest, no need for backup
         await loadDocuments(currentProjectId);
     } catch(e) { setSaveStatus('error'); console.error('saveDocument:', e); }
 }
@@ -209,6 +228,7 @@ function showEditor() {
 }
 
 function hideEditor() {
+    stopAutoSave(); // Stop the interval when leaving a doc
     welcomeScreen.classList.remove('hidden');
     editorWrapper.classList.remove('visible');
     docTitleInput.value = '';
@@ -279,6 +299,139 @@ docTitleModalInput.addEventListener('keydown', e => { if (e.key === 'Enter') cre
 saveBtn.addEventListener('click', saveDocument);
 exportPdfBtn.addEventListener('click', () => alert('PDF export — coming in Step 7!'));
 exportDocxBtn.addEventListener('click', () => alert('DOCX export — coming in Step 7!'));
+
+// =============================================
+// AUTO-SAVE & LOCALSTORAGE BACKUP
+// =============================================
+
+// --- localStorage helpers ---
+// We store content with a key based on doc ID so each doc has its own backup
+
+function getLocalKey(docId) {
+    // e.g. "scripvia_doc_42"
+    return `scripvia_doc_${docId}`;
+}
+
+function saveToLocalStorage() {
+    // Called on every keystroke — saves content + title as a safety net
+    if (!currentDocId || !quill) return;
+
+    const backup = {
+        title:     docTitleInput.value,
+        content:   quill.root.innerHTML,
+        savedAt:   Date.now()
+    };
+
+    try {
+        localStorage.setItem(getLocalKey(currentDocId), JSON.stringify(backup));
+    } catch(e) {
+        // localStorage can fail if storage is full
+        console.warn('localStorage backup failed:', e);
+    }
+}
+
+function loadFromLocalStorage(docId) {
+    // Returns the backup object or null if nothing stored
+    try {
+        const raw = localStorage.getItem(getLocalKey(docId));
+        return raw ? JSON.parse(raw) : null;
+    } catch(e) {
+        return null;
+    }
+}
+
+function clearLocalStorage(docId) {
+    // Call this after a successful server save — cleanup old backup
+    try {
+        localStorage.removeItem(getLocalKey(docId));
+    } catch(e) {}
+}
+
+// --- Auto-save interval ---
+
+function startAutoSave() {
+    // Clear any existing timers first (prevents duplicates)
+    stopAutoSave();
+
+    secondsUntilSave = 30;
+
+    // Countdown: tick every second and update status display
+    countdownTimer = setInterval(() => {
+        secondsUntilSave--;
+
+        // Only show countdown if there's unsaved content
+        if (saveStatus.classList.contains('unsaved') && secondsUntilSave > 0) {
+            saveStatus.textContent = `● Saving in ${secondsUntilSave}s`;
+        }
+
+        if (secondsUntilSave <= 0) {
+            secondsUntilSave = 30; // Reset for next cycle
+        }
+    }, 1000);
+
+    // Actual save: every 30 seconds
+    autoSaveTimer = setInterval(async () => {
+        if (currentDocId && saveStatus.classList.contains('unsaved')) {
+            await saveDocument();           // Save to server
+            clearLocalStorage(currentDocId); // Clean up localStorage after server save
+        }
+    }, 30000);
+}
+
+function stopAutoSave() {
+    // Clean up all timers — called when closing a doc or switching docs
+    if (autoSaveTimer)   { clearInterval(autoSaveTimer);   autoSaveTimer = null; }
+    if (countdownTimer)  { clearInterval(countdownTimer);  countdownTimer = null; }
+    secondsUntilSave = 30;
+}
+
+function resetCountdown() {
+    // Reset the 30s countdown whenever the user types
+    secondsUntilSave = 30;
+}
+
+// --- localStorage restore on doc open ---
+
+function checkLocalStorageRestore(docId, serverContent) {
+    const backup = loadFromLocalStorage(docId);
+    if (!backup) return false; // No backup, nothing to do
+
+    // Only offer restore if backup is NEWER than server content
+    // (i.e. user had unsaved changes when app closed)
+    const backupAge = Date.now() - backup.savedAt;
+    const isRecent = backupAge < 24 * 60 * 60 * 1000; // Within last 24 hours
+
+    if (!isRecent) {
+        clearLocalStorage(docId); // Old backup, discard it
+        return false;
+    }
+
+    // If backup content differs from server, ask user if they want to restore
+    if (backup.content !== serverContent) {
+        const timeAgo = formatTimeAgo(backup.savedAt);
+        const restore = confirm(
+            `📋 Unsaved changes found from ${timeAgo}.\n\nRestore them? (Cancel to keep the server version)`
+        );
+
+        if (restore) {
+            quill.root.innerHTML = backup.content || '';
+            docTitleInput.value  = backup.title || '';
+            setSaveStatus('unsaved');
+            return true;
+        } else {
+            clearLocalStorage(docId); // User declined, clean up
+        }
+    }
+
+    return false;
+}
+
+function formatTimeAgo(timestamp) {
+    const diff = Math.floor((Date.now() - timestamp) / 1000);
+    if (diff < 60)   return `${diff} seconds ago`;
+    if (diff < 3600) return `${Math.floor(diff / 60)} minutes ago`;
+    return `${Math.floor(diff / 3600)} hours ago`;
+}
 
 // =============================================
 // INIT

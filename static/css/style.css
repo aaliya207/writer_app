@@ -345,8 +345,8 @@ body { display: flex; height: 100vh; }
     width: 100%;
     letter-spacing: 0.02em;
 }
-.doc-title-input::placeholder { color: var(--text-muted); }
-.doc-title-input:disabled { opacity: 0.35; cursor: not-allowed; }
+.doc-title-input::placeholder { color: var(--text-secondary); }
+.doc-title-input:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .header-actions {
     display: flex;
@@ -356,8 +356,8 @@ body { display: flex; height: 100vh; }
 }
 
 .save-status {
-    font-size: 12px;
-    color: var(--text-muted);
+    font-size: 13px;
+    color: var(--text-secondary);
     font-style: italic;
     min-width: 72px;
     text-align: right;
@@ -536,9 +536,9 @@ body { display: flex; height: 100vh; }
 }
 
 .welcome-hint {
-    font-size: 12px;
-    color: var(--text-faint);
-    letter-spacing: 0.06em;
+    font-size: 14px;
+    color: var(--text-secondary);
+    letter-spacing: 0.04em;
 }
 
 /* =============================================
@@ -591,7 +591,7 @@ body { display: flex; height: 100vh; }
     white-space: nowrap;
 }
 .btn-ghost:hover { border-color: var(--accent); color: var(--text-primary); background: var(--accent-soft); }
-.btn-ghost:disabled { opacity: 0.3; cursor: not-allowed; pointer-events: none; }
+.btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
 
 .btn-ghost-sm {
     background: none;
@@ -623,7 +623,7 @@ body { display: flex; height: 100vh; }
     white-space: nowrap;
 }
 .btn-save:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
-.btn-save:disabled { opacity: 0.28; cursor: not-allowed; pointer-events: none; }
+.btn-save:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
 
 .btn-icon {
     background: none;
