@@ -432,11 +432,37 @@ function formatTimeAgo(timestamp) {
     if (diff < 3600) return `${Math.floor(diff / 60)} minutes ago`;
     return `${Math.floor(diff / 3600)} hours ago`;
 }
+// =============================================
+// AUTH — Check login state on page load
+// =============================================
+async function checkAuthState() {
+    try {
+        const data = await api('GET', '/auth/me');
+        const loginBtn  = document.getElementById('loginBtn');
+        const userInfo  = document.getElementById('userInfo');
+        const userAvatar = document.getElementById('userAvatar');
+        const userName  = document.getElementById('userName');
 
+        if (data.logged_in) {
+            // Show user info, hide login button
+            loginBtn.style.display  = 'none';
+            userInfo.classList.remove('hidden');
+            userAvatar.src = data.user.picture;
+            userName.textContent = data.user.name.split(' ')[0]; // First name only
+        } else {
+            // Show login button, hide user info
+            loginBtn.style.display  = 'flex';
+            userInfo.classList.add('hidden');
+        }
+    } catch(e) {
+        console.error('Auth check failed:', e);
+    }
+}
 // =============================================
 // INIT
 // =============================================
 document.addEventListener('DOMContentLoaded', () => {
     initQuill();
     loadProjects();
+    checkAuthState();
 });
