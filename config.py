@@ -31,3 +31,7 @@ class Config:
         'https://www.googleapis.com/auth/userinfo.profile',
         'https://www.googleapis.com/auth/drive.file'
     ]
+    
+    #session cookies
+    SESSION_COOKIE_SECURE = False    # Fine for localhost
+    SESSION_COOKIE_SAMESITE = 'Lax'

@@ -21,6 +21,7 @@ const saveStatus      = document.getElementById('saveStatus');
 const saveBtn         = document.getElementById('saveBtn');
 const exportPdfBtn    = document.getElementById('exportPdfBtn');
 const exportDocxBtn   = document.getElementById('exportDocxBtn');
+const syncDriveBtn    = document.getElementById('syncDriveBtn');
 
 const newProjectModal   = document.getElementById('newProjectModal');
 const newDocModal       = document.getElementById('newDocModal');
@@ -244,9 +245,10 @@ function setSaveStatus(status) {
 }
 
 function enableHeaderBtns(on) {
-    saveBtn.disabled = !on;
+    saveBtn.disabled      = !on;
     exportPdfBtn.disabled = !on;
-    exportDocxBtn.disabled = !on;
+    exportDocxBtn.disabled= !on;
+    syncDriveBtn.disabled = !on;
 }
 
 function escapeHtml(str) {
@@ -299,6 +301,7 @@ docTitleModalInput.addEventListener('keydown', e => { if (e.key === 'Enter') cre
 saveBtn.addEventListener('click', saveDocument);
 exportPdfBtn.addEventListener('click', () => alert('PDF export — coming in Step 7!'));
 exportDocxBtn.addEventListener('click', () => alert('DOCX export — coming in Step 7!'));
+syncDriveBtn.addEventListener('click', syncToDrive);
 
 // =============================================
 // AUTO-SAVE & LOCALSTORAGE BACKUP
@@ -431,6 +434,66 @@ function formatTimeAgo(timestamp) {
     if (diff < 60)   return `${diff} seconds ago`;
     if (diff < 3600) return `${Math.floor(diff / 60)} minutes ago`;
     return `${Math.floor(diff / 3600)} hours ago`;
+}
+// =============================================
+// GOOGLE DRIVE SYNC
+// =============================================
+
+async function syncToDrive() {
+    if (!currentDocId) return;
+
+    // First save to server, then sync to Drive
+    await saveDocument();
+
+    syncDriveBtn.classList.remove('synced', 'error');
+    syncDriveBtn.classList.add('syncing');
+    syncDriveBtn.innerHTML = `
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+        </svg>
+        Syncing...`;
+
+    try {
+        const result = await api('POST', `/api/documents/${currentDocId}/sync`);
+
+        syncDriveBtn.classList.remove('syncing');
+        syncDriveBtn.classList.add('synced');
+        syncDriveBtn.innerHTML = `
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
+            </svg>
+            Synced!`;
+
+        // Reset button after 3 seconds
+        setTimeout(() => {
+            syncDriveBtn.classList.remove('synced');
+            syncDriveBtn.innerHTML = `
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M6.28 3L1 12.14 6.28 21h11.44L23 12.14 17.72 3H6.28zm.94 2h9.56l4.5 7.14-4.5 7.14H7.22l-4.5-7.14L7.22 5zM12 8l-4 7h8l-4-7z"/>
+                </svg>
+                Sync`;
+        }, 3000);
+
+    } catch(e) {
+        syncDriveBtn.classList.remove('syncing');
+        syncDriveBtn.classList.add('error');
+        syncDriveBtn.innerHTML = `
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+            </svg>
+            Failed`;
+
+        setTimeout(() => {
+            syncDriveBtn.classList.remove('error');
+            syncDriveBtn.innerHTML = `
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M6.28 3L1 12.14 6.28 21h11.44L23 12.14 17.72 3H6.28zm.94 2h9.56l4.5 7.14-4.5 7.14H7.22l-4.5-7.14L7.22 5zM12 8l-4 7h8l-4-7z"/>
+                </svg>
+                Sync`;
+        }, 3000);
+
+        console.error('Drive sync failed:', e);
+    }
 }
 // =============================================
 // AUTH — Check login state on page load

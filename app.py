@@ -7,16 +7,21 @@ import os
 import urllib.parse
 import requests as http_requests
 import secrets
+import re
 
-# Keep this for Drive API in Step 5
 from googleapiclient.discovery import build
+from googleapiclient.http import MediaInMemoryUpload
+
+from datetime import timedelta
 
 app = Flask(__name__)
 app.config.from_object(Config)
+app.permanent_session_lifetime = timedelta(days=30)  # Stay logged in for 30 days
 
 db = SQLAlchemy(app)
+from flask_migrate import Migrate
+migrate = Migrate(app, db)
 
-# Allow HTTP for local development
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
 
@@ -25,15 +30,15 @@ os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 # =============================================
 
 class User(db.Model):
-    """Stores Google account info after login"""
-    id            = db.Column(db.Integer, primary_key=True)
-    google_id     = db.Column(db.String(200), unique=True, nullable=False)
-    email         = db.Column(db.String(200), nullable=False)
-    name          = db.Column(db.String(200), default='')
-    picture       = db.Column(db.String(500), default='')
-    access_token  = db.Column(db.Text, default='')
-    refresh_token = db.Column(db.Text, default='')
-    created_at    = db.Column(db.DateTime, default=datetime.utcnow)
+    id                 = db.Column(db.Integer, primary_key=True)
+    google_id          = db.Column(db.String(200), unique=True, nullable=False)
+    email              = db.Column(db.String(200), nullable=False)
+    name               = db.Column(db.String(200), default='')
+    picture            = db.Column(db.String(500), default='')
+    access_token       = db.Column(db.Text, default='')
+    refresh_token      = db.Column(db.Text, default='')
+    scripvia_folder_id = db.Column(db.String(200), default='')  # Root Scripvia folder on Drive
+    created_at         = db.Column(db.DateTime, default=datetime.utcnow)
 
     projects = db.relationship('Project', backref='owner', lazy=True)
 
@@ -47,12 +52,13 @@ class User(db.Model):
 
 
 class Project(db.Model):
-    id          = db.Column(db.Integer, primary_key=True)
-    title       = db.Column(db.String(200), nullable=False)
-    description = db.Column(db.Text, default='')
-    user_id     = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
-    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at  = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    id              = db.Column(db.Integer, primary_key=True)
+    title           = db.Column(db.String(200), nullable=False)
+    description     = db.Column(db.Text, default='')
+    user_id         = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    drive_folder_id = db.Column(db.String(200), default='')  # This project's folder on Drive
+    created_at      = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at      = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     documents = db.relationship('Document', backref='project', lazy=True, cascade='all, delete-orphan')
 
@@ -68,26 +74,28 @@ class Project(db.Model):
 
 
 class Document(db.Model):
-    id         = db.Column(db.Integer, primary_key=True)
-    title      = db.Column(db.String(200), nullable=False)
-    content    = db.Column(db.Text, default='')
-    project_id = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    id            = db.Column(db.Integer, primary_key=True)
+    title         = db.Column(db.String(200), nullable=False)
+    content       = db.Column(db.Text, default='')
+    project_id    = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
+    drive_file_id = db.Column(db.String(200), default='')  # This document's file on Drive
+    created_at    = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at    = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     def to_dict(self):
         return {
-            'id':         self.id,
-            'title':      self.title,
-            'content':    self.content,
-            'project_id': self.project_id,
-            'created_at': self.created_at.isoformat(),
-            'updated_at': self.updated_at.isoformat()
+            'id':            self.id,
+            'title':         self.title,
+            'content':       self.content,
+            'project_id':    self.project_id,
+            'drive_file_id': self.drive_file_id,
+            'created_at':    self.created_at.isoformat(),
+            'updated_at':    self.updated_at.isoformat()
         }
 
 
 # =============================================
-# HELPER
+# HELPERS
 # =============================================
 
 def get_current_user():
@@ -95,6 +103,91 @@ def get_current_user():
     if not user_id:
         return None
     return User.query.get(user_id)
+
+
+def get_drive_service(user):
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+
+    creds = Credentials(
+        token         = user.access_token,
+        refresh_token = user.refresh_token,
+        token_uri     = 'https://oauth2.googleapis.com/token',
+        client_id     = app.config['GOOGLE_CLIENT_ID'],
+        client_secret = app.config['GOOGLE_CLIENT_SECRET']
+    )
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+        user.access_token = creds.token
+        db.session.commit()
+    return build('drive', 'v3', credentials=creds)
+
+
+def get_or_create_folder(drive, name, parent_id=None):
+    """Find or create a Drive folder by name, optionally inside a parent"""
+    query = f"name='{name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    if parent_id:
+        query += f" and '{parent_id}' in parents"
+
+    results = drive.files().list(q=query, fields='files(id, name)', pageSize=1).execute()
+    files = results.get('files', [])
+    if files:
+        return files[0]['id']
+
+    metadata = {'name': name, 'mimeType': 'application/vnd.google-apps.folder'}
+    if parent_id:
+        metadata['parents'] = [parent_id]
+
+    folder = drive.files().create(body=metadata, fields='id').execute()
+    return folder.get('id')
+
+
+def create_drive_file(drive, name, content, parent_id):
+    """Create a new .txt file on Drive inside a folder"""
+    file_bytes = content.encode('utf-8')
+    media      = MediaInMemoryUpload(file_bytes, mimetype='text/plain', resumable=False)
+    metadata   = {'name': f"{name}.txt", 'parents': [parent_id]}
+    created    = drive.files().create(body=metadata, media_body=media, fields='id').execute()
+    return created.get('id')
+
+
+def update_drive_file(drive, file_id, name, content):
+    """Update an existing .txt file on Drive"""
+    file_bytes = content.encode('utf-8')
+    media      = MediaInMemoryUpload(file_bytes, mimetype='text/plain', resumable=False)
+    drive.files().update(
+        fileId     = file_id,
+        body       = {'name': f"{name}.txt"},
+        media_body = media
+    ).execute()
+
+
+def html_to_plain_text(html_content):
+    """Convert Quill HTML to clean plain text"""
+    text = re.sub(r'<br\s*/?>', '\n', html_content)
+    text = re.sub(r'</p>', '\n\n', text)
+    text = re.sub(r'</h[1-3]>', '\n\n', text)
+    text = re.sub(r'<li>', '• ', text)
+    text = re.sub(r'</li>', '\n', text)
+    text = re.sub(r'<[^>]+>', '', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
+def setup_scripvia_folder(user):
+    """Create the root Scripvia folder on Drive right after login"""
+    if user.scripvia_folder_id:
+        return user.scripvia_folder_id
+    try:
+        drive     = get_drive_service(user)
+        folder_id = get_or_create_folder(drive, 'Scripvia')
+        user.scripvia_folder_id = folder_id
+        db.session.commit()
+        print(f"✅ Scripvia root folder created: {folder_id}")
+        return folder_id
+    except Exception as e:
+        print(f"Could not create Scripvia folder: {e}")
+        return None
 
 
 # =============================================
@@ -112,11 +205,9 @@ def index():
 
 @app.route('/auth/login')
 def auth_login():
-    # Generate a random state token to prevent CSRF attacks
     state = secrets.token_urlsafe(32)
     session['oauth_state'] = state
 
-    # Build the Google OAuth URL manually (avoids the buggy Flow class)
     params = {
         'client_id':     app.config['GOOGLE_CLIENT_ID'],
         'redirect_uri':  app.config['GOOGLE_REDIRECT_URI'],
@@ -133,12 +224,10 @@ def auth_login():
 
 @app.route('/auth/callback')
 def auth_callback():
-    # Get the auth code Google sent back
     code = request.args.get('code')
     if not code:
         return 'Login failed — no code received', 400
 
-    # Exchange the auth code for access + refresh tokens
     token_response = http_requests.post(
         'https://oauth2.googleapis.com/token',
         data={
@@ -151,18 +240,15 @@ def auth_callback():
     )
 
     tokens = token_response.json()
-
     if 'error' in tokens:
         return f"Token error: {tokens.get('error_description', tokens['error'])}", 400
 
-    # Use access token to get user's Google profile
     profile_response = http_requests.get(
         'https://www.googleapis.com/oauth2/v2/userinfo',
         headers={'Authorization': f"Bearer {tokens['access_token']}"}
     )
     profile = profile_response.json()
 
-    # Find or create user in database
     user = User.query.filter_by(google_id=profile['id']).first()
     if not user:
         user = User(
@@ -173,13 +259,15 @@ def auth_callback():
         )
         db.session.add(user)
 
-    # Save tokens for Drive API calls in Step 5
     user.access_token  = tokens.get('access_token', '')
     user.refresh_token = tokens.get('refresh_token', getattr(user, 'refresh_token', ''))
     db.session.commit()
 
     session['user_id'] = user.id
     session.permanent  = True
+
+    # ✅ Create Scripvia root folder on Drive immediately after login
+    setup_scripvia_folder(user)
 
     return redirect('/')
 
@@ -207,15 +295,39 @@ def get_projects():
     projects = Project.query.order_by(Project.updated_at.desc()).all()
     return jsonify([p.to_dict() for p in projects])
 
+
 @app.route('/api/projects', methods=['POST'])
 def create_project():
     data = request.get_json()
     if not data or not data.get('title'):
         return jsonify({'error': 'Title required'}), 400
+
     project = Project(title=data['title'], description=data.get('description', ''))
     db.session.add(project)
     db.session.commit()
+
+    # ✅ Immediately create a folder on Drive for this project
+    user = get_current_user()
+    if user and user.access_token:
+        try:
+            drive = get_drive_service(user)
+
+            # Make sure root Scripvia folder exists
+            if not user.scripvia_folder_id:
+                user.scripvia_folder_id = get_or_create_folder(drive, 'Scripvia')
+                db.session.commit()
+
+            # Create the project folder inside Scripvia
+            project.drive_folder_id = get_or_create_folder(
+                drive, project.title, parent_id=user.scripvia_folder_id
+            )
+            db.session.commit()
+            print(f"✅ Project folder created on Drive: {project.title}")
+        except Exception as e:
+            print(f"Could not create Drive folder for project (offline?): {e}")
+
     return jsonify(project.to_dict()), 201
+
 
 @app.route('/api/projects/<int:project_id>', methods=['DELETE'])
 def delete_project(project_id):
@@ -224,26 +336,67 @@ def delete_project(project_id):
     db.session.commit()
     return jsonify({'message': 'Deleted'})
 
+
+# =============================================
+# DOCUMENT ROUTES
+# =============================================
+
 @app.route('/api/projects/<int:project_id>/documents', methods=['GET'])
 def get_documents(project_id):
     Project.query.get_or_404(project_id)
     docs = Document.query.filter_by(project_id=project_id).order_by(Document.updated_at.desc()).all()
     return jsonify([d.to_dict() for d in docs])
 
+
 @app.route('/api/projects/<int:project_id>/documents', methods=['POST'])
 def create_document(project_id):
-    Project.query.get_or_404(project_id)
-    data = request.get_json()
+    project = Project.query.get_or_404(project_id)
+    data    = request.get_json()
     if not data or not data.get('title'):
         return jsonify({'error': 'Title required'}), 400
+
     doc = Document(title=data['title'], content=data.get('content', ''), project_id=project_id)
     db.session.add(doc)
     db.session.commit()
+
+    # ✅ Immediately create the .txt file on Drive
+    user = get_current_user()
+    if user and user.access_token:
+        try:
+            drive = get_drive_service(user)
+
+            # Ensure root folder exists
+            if not user.scripvia_folder_id:
+                user.scripvia_folder_id = get_or_create_folder(drive, 'Scripvia')
+                db.session.commit()
+
+            # Ensure project folder exists
+            if not project.drive_folder_id:
+                project.drive_folder_id = get_or_create_folder(
+                    drive, project.title, parent_id=user.scripvia_folder_id
+                )
+                db.session.commit()
+
+            # Create empty .txt file in the project folder
+            file_id = create_drive_file(
+                drive,
+                doc.title,
+                f"{doc.title}\n{'=' * len(doc.title)}\n\n(empty)",
+                project.drive_folder_id
+            )
+            doc.drive_file_id = file_id
+            db.session.commit()
+            print(f"✅ Drive file created: {doc.title}.txt")
+        except Exception as e:
+            print(f"Could not create Drive file for document (offline?): {e}")
+
     return jsonify(doc.to_dict()), 201
+
 
 @app.route('/api/documents/<int:doc_id>', methods=['GET'])
 def get_document(doc_id):
     return jsonify(Document.query.get_or_404(doc_id).to_dict())
+
 
 @app.route('/api/documents/<int:doc_id>', methods=['PUT'])
 def update_document(doc_id):
@@ -255,12 +408,69 @@ def update_document(doc_id):
     db.session.commit()
     return jsonify(doc.to_dict())
 
+
 @app.route('/api/documents/<int:doc_id>', methods=['DELETE'])
 def delete_document(doc_id):
     doc = Document.query.get_or_404(doc_id)
     db.session.delete(doc)
     db.session.commit()
     return jsonify({'message': 'Deleted'})
+
+
+# =============================================
+# GOOGLE DRIVE SYNC ROUTE
+# =============================================
+
+@app.route('/api/documents/<int:doc_id>/sync', methods=['POST'])
+def sync_to_drive(doc_id):
+    """Called by auto-save to update the Drive file with latest content"""
+    user = get_current_user()
+    if not user or not user.access_token:
+        return jsonify({'error': 'Not logged in'}), 401
+
+    doc     = Document.query.get_or_404(doc_id)
+    project = Project.query.get_or_404(doc.project_id)
+
+    try:
+        drive = get_drive_service(user)
+
+        # Ensure folder structure exists (handles offline-created projects)
+        if not user.scripvia_folder_id:
+            user.scripvia_folder_id = get_or_create_folder(drive, 'Scripvia')
+            db.session.commit()
+
+        if not project.drive_folder_id:
+            project.drive_folder_id = get_or_create_folder(
+                drive, project.title, parent_id=user.scripvia_folder_id
+            )
+            db.session.commit()
+
+        # Convert HTML to plain text
+        plain_text = html_to_plain_text(doc.content or '')
+        file_text  = f"{doc.title}\n{'=' * len(doc.title)}\n\n{plain_text}"
+
+        if doc.drive_file_id:
+            # File already exists — update it
+            update_drive_file(drive, doc.drive_file_id, doc.title, file_text)
+            action = 'updated'
+        else:
+            # File doesn't exist yet (created offline) — create it now
+            file_id = create_drive_file(drive, doc.title, file_text, project.drive_folder_id)
+            doc.drive_file_id = file_id
+            db.session.commit()
+            action = 'created'
+
+        return jsonify({'success': True, 'action': action})
+
+    except Exception as e:
+        print(f"Drive sync error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/documents/<int:doc_id>/sync-status', methods=['GET'])
+def sync_status(doc_id):
+    doc = Document.query.get_or_404(doc_id)
+    return jsonify({'synced': bool(doc.drive_file_id), 'drive_file_id': doc.drive_file_id})
 
 
 # =============================================
