@@ -198,7 +198,13 @@ def setup_scripvia_folder(user):
 def index():
     return render_template('index.html')
 
-
+@app.route('/login')
+def login_page():
+    # If already logged in, go straight to app
+    user = get_current_user()
+    if user:
+        return redirect('/')
+    return render_template('login.html')
 # =============================================
 # AUTH ROUTES
 # =============================================
@@ -269,13 +275,13 @@ def auth_callback():
     # ✅ Create Scripvia root folder on Drive immediately after login
     setup_scripvia_folder(user)
 
-    return redirect('/')
+    return redirect('/?logged_in=true')
 
 
 @app.route('/auth/logout')
 def auth_logout():
     session.clear()
-    return redirect('/')
+    return redirect('/login')
 
 
 @app.route('/auth/me')

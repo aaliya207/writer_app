@@ -544,14 +544,70 @@ docTitleModalInput.addEventListener('keydown', e => { if (e.key === 'Enter') cre
 
 saveBtn.addEventListener('click', saveDocument);
 syncDriveBtn.addEventListener('click', syncToDrive);
+function showGuestUser(name) {
+    // Show guest name in the sidebar footer instead of login button
+    const loginBtn  = document.getElementById('loginBtn');
+    const userInfo  = document.getElementById('userInfo');
+    const userName  = document.getElementById('userName');
+    const userAvatar = document.getElementById('userAvatar');
 
+    if (loginBtn)  loginBtn.style.display = 'none';
+    if (userInfo)  userInfo.classList.remove('hidden');
+    if (userName)  userName.textContent = name;
+    if (userAvatar) {
+        // Show a placeholder avatar for guests
+        userAvatar.style.display = 'none';
+    }
+
+    // Add a logout/switch account option
+    const footer = document.querySelector('.sidebar-footer');
+    if (footer) {
+        const switchBtn = document.createElement('a');
+        switchBtn.href = '/login';
+        switchBtn.className = 'btn-ghost-sm';
+        switchBtn.style.fontSize = '11px';
+        switchBtn.textContent = '↪ Switch account';
+        switchBtn.addEventListener('click', () => {
+            localStorage.removeItem('scripvia_guest');
+        });
+        footer.appendChild(switchBtn);
+    }
+}
 // =============================================
 // INIT
 // =============================================
 document.addEventListener('DOMContentLoaded', () => {
-    applyTheme();    // Apply saved theme before anything renders
-    applySidebar();  // Apply saved sidebar state
-    initQuill();
-    loadProjects();
-    checkAuthState();
+    // Check if user is logged in or is a guest
+    // If neither, redirect to login page
+    const guest = localStorage.getItem('scripvia_guest');
+
+    fetch('/auth/me')
+        .then(r => r.json())
+        .then(data => {
+            if (!data.logged_in && !guest) {
+                // Not logged in, not a guest — go to login page
+                window.location.href = '/login';
+                return;
+            }
+
+            // Good to go — initialize the app
+            applyTheme();
+            applySidebar();
+            initQuill();
+            loadProjects();
+            checkAuthState();
+
+            // Show guest name if in guest mode
+            if (!data.logged_in && guest) {
+                const guestData = JSON.parse(guest);
+                showGuestUser(guestData.name);
+            }
+        })
+        .catch(() => {
+            // If auth check fails, still load app (offline mode)
+            applyTheme();
+            applySidebar();
+            initQuill();
+            loadProjects();
+        });
 });
