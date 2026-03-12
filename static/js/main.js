@@ -299,8 +299,15 @@ document.getElementById('confirmDocBtn').addEventListener('click', createDocumen
 docTitleModalInput.addEventListener('keydown', e => { if (e.key === 'Enter') createDocument(); });
 
 saveBtn.addEventListener('click', saveDocument);
-exportPdfBtn.addEventListener('click', () => alert('PDF export — coming in Step 7!'));
-exportDocxBtn.addEventListener('click', () => alert('DOCX export — coming in Step 7!'));
+exportPdfBtn.addEventListener('click', () => {
+    if (!currentDocId) return;
+    window.location.href = `/api/documents/${currentDocId}/export/pdf`;
+});
+
+exportDocxBtn.addEventListener('click', () => {
+    if (!currentDocId) return;
+    window.location.href = `/api/documents/${currentDocId}/export/docx`;
+});
 syncDriveBtn.addEventListener('click', syncToDrive);
 
 // =============================================

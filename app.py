@@ -472,7 +472,268 @@ def sync_status(doc_id):
     doc = Document.query.get_or_404(doc_id)
     return jsonify({'synced': bool(doc.drive_file_id), 'drive_file_id': doc.drive_file_id})
 
+# =============================================
+# EXPORT ROUTES
+# =============================================
 
+@app.route('/api/documents/<int:doc_id>/export/pdf', methods=['GET'])
+def export_pdf(doc_id):
+    """Export document as a formatted PDF"""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER
+    from bs4 import BeautifulSoup
+    import io
+
+    doc = Document.query.get_or_404(doc_id)
+    project = Project.query.get_or_404(doc.project_id)
+
+    # Create PDF in memory
+    buffer = io.BytesIO()
+    pdf = SimpleDocTemplate(
+        buffer,
+        pagesize      = A4,
+        rightMargin   = 1 * inch,
+        leftMargin    = 1 * inch,
+        topMargin     = 1.2 * inch,
+        bottomMargin  = 1 * inch,
+        title         = doc.title,
+        author        = 'Scripvia'
+    )
+
+    # Define styles
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent    = styles['Title'],
+        fontSize  = 24,
+        textColor = colors.HexColor('#3d3580'),
+        spaceAfter= 6,
+        fontName  = 'Helvetica-Bold'
+    )
+
+    subtitle_style = ParagraphStyle(
+        'Subtitle',
+        parent    = styles['Normal'],
+        fontSize  = 11,
+        textColor = colors.HexColor('#888888'),
+        spaceAfter= 24,
+        fontName  = 'Helvetica'
+    )
+
+    h1_style = ParagraphStyle(
+        'H1',
+        parent    = styles['Heading1'],
+        fontSize  = 18,
+        textColor = colors.HexColor('#3d3580'),
+        spaceBefore = 16,
+        spaceAfter  = 8,
+        fontName  = 'Helvetica-Bold'
+    )
+
+    h2_style = ParagraphStyle(
+        'H2',
+        parent    = styles['Heading2'],
+        fontSize  = 14,
+        textColor = colors.HexColor('#5548a0'),
+        spaceBefore = 12,
+        spaceAfter  = 6,
+        fontName  = 'Helvetica-Bold'
+    )
+
+    h3_style = ParagraphStyle(
+        'H3',
+        parent    = styles['Heading3'],
+        fontSize  = 12,
+        textColor = colors.HexColor('#7b6fb0'),
+        spaceBefore = 10,
+        spaceAfter  = 4,
+        fontName  = 'Helvetica-Bold'
+    )
+
+    body_style = ParagraphStyle(
+        'CustomBody',
+        parent      = styles['Normal'],
+        fontSize    = 11,
+        leading     = 18,
+        spaceAfter  = 8,
+        fontName    = 'Helvetica',
+        textColor   = colors.HexColor('#1a1a2e')
+    )
+
+    quote_style = ParagraphStyle(
+        'Quote',
+        parent      = styles['Normal'],
+        fontSize    = 11,
+        leading     = 18,
+        leftIndent  = 24,
+        spaceAfter  = 8,
+        fontName    = 'Helvetica-Oblique',
+        textColor   = colors.HexColor('#555555')
+    )
+
+    # Build content
+    story = []
+
+    # Title + project name
+    story.append(Paragraph(doc.title, title_style))
+    story.append(Paragraph(f"from {project.title} · exported via Scripvia", subtitle_style))
+    story.append(Spacer(1, 0.2 * inch))
+
+    # Parse HTML content
+    soup = BeautifulSoup(doc.content or '', 'html.parser')
+
+    for element in soup.find_all(['p', 'h1', 'h2', 'h3', 'blockquote', 'ul', 'ol', 'li']):
+        text = element.get_text(strip=True)
+        if not text:
+            continue
+
+        tag = element.name
+
+        if tag == 'h1':
+            story.append(Paragraph(text, h1_style))
+        elif tag == 'h2':
+            story.append(Paragraph(text, h2_style))
+        elif tag == 'h3':
+            story.append(Paragraph(text, h3_style))
+        elif tag == 'blockquote':
+            story.append(Paragraph(f'"{text}"', quote_style))
+        elif tag == 'li':
+            story.append(Paragraph(f"• {text}", body_style))
+        elif tag == 'p':
+            story.append(Paragraph(text, body_style))
+
+        story.append(Spacer(1, 0.05 * inch))
+
+    # Build the PDF
+    pdf.build(story)
+    buffer.seek(0)
+
+    from flask import send_file
+    return send_file(
+        buffer,
+        as_attachment  = True,
+        download_name  = f"{doc.title}.pdf",
+        mimetype       = 'application/pdf'
+    )
+
+
+@app.route('/api/documents/<int:doc_id>/export/docx', methods=['GET'])
+def export_docx(doc_id):
+    """Export document as a formatted DOCX"""
+    from docx import Document as DocxDocument
+    from docx.shared import Pt, RGBColor, Inches
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from bs4 import BeautifulSoup
+    import io
+
+    doc     = Document.query.get_or_404(doc_id)
+    project = Project.query.get_or_404(doc.project_id)
+
+    # Create Word document
+    word = DocxDocument()
+
+    # Set page margins
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    section = word.sections[0]
+    section.top_margin    = Inches(1.2)
+    section.bottom_margin = Inches(1)
+    section.left_margin   = Inches(1)
+    section.right_margin  = Inches(1)
+
+    # Helper to set font color
+    def set_color(run, hex_color):
+        hex_color = hex_color.lstrip('#')
+        r, g, b   = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        run.font.color.rgb = RGBColor(r, g, b)
+
+    # Document title
+    title_para = word.add_paragraph()
+    title_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    title_run  = title_para.add_run(doc.title)
+    title_run.font.size = Pt(24)
+    title_run.font.bold = True
+    set_color(title_run, '#3d3580')
+
+    # Subtitle
+    sub_para = word.add_paragraph()
+    sub_run  = sub_para.add_run(f"from {project.title} · exported via Scripvia")
+    sub_run.font.size   = Pt(10)
+    sub_run.font.italic = True
+    set_color(sub_run, '#888888')
+
+    # Spacer
+    word.add_paragraph()
+
+    # Parse HTML
+    soup = BeautifulSoup(doc.content or '', 'html.parser')
+
+    for element in soup.find_all(['p', 'h1', 'h2', 'h3', 'blockquote', 'ul', 'ol', 'li']):
+        text = element.get_text(strip=True)
+        if not text:
+            continue
+
+        tag = element.name
+
+        if tag == 'h1':
+            p   = word.add_paragraph()
+            run = p.add_run(text)
+            run.font.size = Pt(18)
+            run.font.bold = True
+            set_color(run, '#3d3580')
+
+        elif tag == 'h2':
+            p   = word.add_paragraph()
+            run = p.add_run(text)
+            run.font.size = Pt(14)
+            run.font.bold = True
+            set_color(run, '#5548a0')
+
+        elif tag == 'h3':
+            p   = word.add_paragraph()
+            run = p.add_run(text)
+            run.font.size = Pt(12)
+            run.font.bold = True
+            set_color(run, '#7b6fb0')
+
+        elif tag == 'blockquote':
+            p   = word.add_paragraph()
+            run = p.add_run(f'"{text}"')
+            run.font.size   = Pt(11)
+            run.font.italic = True
+            set_color(run, '#555555')
+            p.paragraph_format.left_indent = Inches(0.4)
+
+        elif tag == 'li':
+            p   = word.add_paragraph()
+            run = p.add_run(f"• {text}")
+            run.font.size = Pt(11)
+            set_color(run, '#1a1a2e')
+
+        elif tag == 'p':
+            p   = word.add_paragraph()
+            run = p.add_run(text)
+            run.font.size = Pt(11)
+            set_color(run, '#1a1a2e')
+            p.paragraph_format.space_after = Pt(6)
+
+    # Save to memory buffer
+    buffer = io.BytesIO()
+    word.save(buffer)
+    buffer.seek(0)
+
+    from flask import send_file
+    return send_file(
+        buffer,
+        as_attachment = True,
+        download_name = f"{doc.title}.docx",
+        mimetype      = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    )
 # =============================================
 # ENTRY POINT
 # =============================================
