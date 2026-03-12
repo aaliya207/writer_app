@@ -8,7 +8,7 @@ import urllib.parse
 import requests as http_requests
 import secrets
 import re
-
+import threading
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaInMemoryUpload
 
@@ -50,28 +50,35 @@ class User(db.Model):
             'picture': self.picture
         }
 
-
 class Project(db.Model):
     id              = db.Column(db.Integer, primary_key=True)
     title           = db.Column(db.String(200), nullable=False)
     description     = db.Column(db.Text, default='')
+    genre           = db.Column(db.String(100), default='general')  # NEW
     user_id         = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
-    drive_folder_id = db.Column(db.String(200), default='')  # This project's folder on Drive
+    drive_folder_id = db.Column(db.String(200), default='')
     created_at      = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at      = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    documents = db.relationship('Document', backref='project', lazy=True, cascade='all, delete-orphan')
+    documents  = db.relationship('Document', backref='project', lazy=True, cascade='all, delete-orphan')
+    characters = db.relationship('Character', backref='project', lazy=True, cascade='all, delete-orphan')
+    scenes     = db.relationship('Scene', backref='project', lazy=True, cascade='all, delete-orphan')
+    lore_items = db.relationship('LoreItem', backref='project', lazy=True, cascade='all, delete-orphan')
+
+    # Genres that unlock Characters, Scenes, Lore tabs
+    CREATIVE_GENRES = ['fantasy', 'sci-fi', 'fiction', 'romance', 'mystery', 'thriller', 'horror', 'historical']
 
     def to_dict(self):
         return {
             'id':             self.id,
             'title':          self.title,
             'description':    self.description,
+            'genre':          self.genre,
+            'is_creative':    self.genre in self.CREATIVE_GENRES,
             'created_at':     self.created_at.isoformat(),
             'updated_at':     self.updated_at.isoformat(),
             'document_count': len(self.documents)
         }
-
 
 class Document(db.Model):
     id            = db.Column(db.Integer, primary_key=True)
@@ -93,6 +100,86 @@ class Document(db.Model):
             'updated_at':    self.updated_at.isoformat()
         }
 
+# Genre options that unlock creative tabs
+CREATIVE_GENRES = ['fantasy', 'sci-fi', 'fiction', 'romance', 'mystery', 'thriller', 'horror', 'historical']
+
+
+class Character(db.Model):
+    """A character in a project"""
+    id          = db.Column(db.Integer, primary_key=True)
+    project_id  = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
+    name        = db.Column(db.String(200), nullable=False)
+    role        = db.Column(db.String(100), default='')        # e.g. Protagonist, Antagonist
+    age         = db.Column(db.String(50), default='')
+    personality = db.Column(db.Text, default='')
+    backstory   = db.Column(db.Text, default='')
+    appearance  = db.Column(db.Text, default='')
+    image_url   = db.Column(db.String(500), default='')        # URL or base64
+    extra_notes = db.Column(db.Text, default='')
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id':          self.id,
+            'project_id':  self.project_id,
+            'name':        self.name,
+            'role':        self.role,
+            'age':         self.age,
+            'personality': self.personality,
+            'backstory':   self.backstory,
+            'appearance':  self.appearance,
+            'image_url':   self.image_url,
+            'extra_notes': self.extra_notes,
+            'created_at':  self.created_at.isoformat()
+        }
+
+
+class Scene(db.Model):
+    """A quick-capture scene — like a sticky note for story moments"""
+    id         = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
+    title      = db.Column(db.String(200), nullable=False)
+    content    = db.Column(db.Text, default='')
+    mood       = db.Column(db.String(100), default='')   # e.g. tense, romantic, mysterious
+    connected_chapter = db.Column(db.String(200), default='')  # Optional link to a chapter
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id':                self.id,
+            'project_id':        self.project_id,
+            'title':             self.title,
+            'content':           self.content,
+            'mood':              self.mood,
+            'connected_chapter': self.connected_chapter,
+            'created_at':        self.created_at.isoformat(),
+            'updated_at':        self.updated_at.isoformat()
+        }
+
+
+class LoreItem(db.Model):
+    """A lore entry — fictional places, items, organizations, magic systems etc."""
+    id          = db.Column(db.Integer, primary_key=True)
+    project_id  = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
+    name        = db.Column(db.String(200), nullable=False)
+    category    = db.Column(db.String(100), default='item')  # item, place, organization, concept
+    description = db.Column(db.Text, default='')
+    image_url   = db.Column(db.String(500), default='')
+    extra_notes = db.Column(db.Text, default='')
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id':          self.id,
+            'project_id':  self.project_id,
+            'name':        self.name,
+            'category':    self.category,
+            'description': self.description,
+            'image_url':   self.image_url,
+            'extra_notes': self.extra_notes,
+            'created_at':  self.created_at.isoformat()
+        }
 
 # =============================================
 # HELPERS
@@ -308,29 +395,38 @@ def create_project():
     if not data or not data.get('title'):
         return jsonify({'error': 'Title required'}), 400
 
-    project = Project(title=data['title'], description=data.get('description', ''))
+    project = Project(
+    title=data['title'],
+    description=data.get('description', ''),
+    genre=data.get('genre', 'general')
+    )
     db.session.add(project)
     db.session.commit()
 
-    # ✅ Immediately create a folder on Drive for this project
+   # Create Drive folder in background so UI doesn't wait
     user = get_current_user()
     if user and user.access_token:
-        try:
-            drive = get_drive_service(user)
+        def create_drive_folder_bg(app, project_id, user_id):
+            with app.app_context():
+                u = User.query.get(user_id)
+                p = Project.query.get(project_id)
+                if not u or not p: return
+                try:
+                    drive = get_drive_service(u)
+                    if not u.scripvia_folder_id:
+                        u.scripvia_folder_id = get_or_create_folder(drive, 'Scripvia')
+                        db.session.commit()
+                    p.drive_folder_id = get_or_create_folder(
+                        drive, p.title, parent_id=u.scripvia_folder_id
+                    )
+                    db.session.commit()
+                    print(f"✅ Drive folder created: {p.title}")
+                except Exception as e:
+                    print(f"Drive folder error: {e}")
 
-            # Make sure root Scripvia folder exists
-            if not user.scripvia_folder_id:
-                user.scripvia_folder_id = get_or_create_folder(drive, 'Scripvia')
-                db.session.commit()
-
-            # Create the project folder inside Scripvia
-            project.drive_folder_id = get_or_create_folder(
-                drive, project.title, parent_id=user.scripvia_folder_id
-            )
-            db.session.commit()
-            print(f"✅ Project folder created on Drive: {project.title}")
-        except Exception as e:
-            print(f"Could not create Drive folder for project (offline?): {e}")
+        t = threading.Thread(target=create_drive_folder_bg, args=(app, project.id, user.id))
+        t.daemon = True
+        t.start()
 
     return jsonify(project.to_dict()), 201
 
@@ -365,36 +461,39 @@ def create_document(project_id):
     db.session.add(doc)
     db.session.commit()
 
-    # ✅ Immediately create the .txt file on Drive
+# Create Drive file in background so UI doesn't wait
     user = get_current_user()
     if user and user.access_token:
-        try:
-            drive = get_drive_service(user)
+        def create_drive_file_bg(app, doc_id, project_id, user_id):
+            with app.app_context():
+                u = User.query.get(user_id)
+                p = Project.query.get(project_id)
+                d = Document.query.get(doc_id)
+                if not u or not p or not d: return
+                try:
+                    drive = get_drive_service(u)
+                    if not u.scripvia_folder_id:
+                        u.scripvia_folder_id = get_or_create_folder(drive, 'Scripvia')
+                        db.session.commit()
+                    if not p.drive_folder_id:
+                        p.drive_folder_id = get_or_create_folder(
+                            drive, p.title, parent_id=u.scripvia_folder_id
+                        )
+                        db.session.commit()
+                    file_id = create_drive_file(
+                        drive, d.title,
+                        f"{d.title}\n{'=' * len(d.title)}\n\n(empty)",
+                        p.drive_folder_id
+                    )
+                    d.drive_file_id = file_id
+                    db.session.commit()
+                    print(f"✅ Drive file created: {d.title}.txt")
+                except Exception as e:
+                    print(f"Drive file error: {e}")
 
-            # Ensure root folder exists
-            if not user.scripvia_folder_id:
-                user.scripvia_folder_id = get_or_create_folder(drive, 'Scripvia')
-                db.session.commit()
-
-            # Ensure project folder exists
-            if not project.drive_folder_id:
-                project.drive_folder_id = get_or_create_folder(
-                    drive, project.title, parent_id=user.scripvia_folder_id
-                )
-                db.session.commit()
-
-            # Create empty .txt file in the project folder
-            file_id = create_drive_file(
-                drive,
-                doc.title,
-                f"{doc.title}\n{'=' * len(doc.title)}\n\n(empty)",
-                project.drive_folder_id
-            )
-            doc.drive_file_id = file_id
-            db.session.commit()
-            print(f"✅ Drive file created: {doc.title}.txt")
-        except Exception as e:
-            print(f"Could not create Drive file for document (offline?): {e}")
+        t = threading.Thread(target=create_drive_file_bg, args=(app, doc.id, project.id, user.id))
+        t.daemon = True
+        t.start()
 
     return jsonify(doc.to_dict()), 201
 
@@ -422,7 +521,192 @@ def delete_document(doc_id):
     db.session.commit()
     return jsonify({'message': 'Deleted'})
 
+# =============================================
+# CHARACTER ROUTES
+# =============================================
 
+@app.route('/api/projects/<int:project_id>/characters', methods=['GET'])
+def get_characters(project_id):
+    Project.query.get_or_404(project_id)
+    chars = Character.query.filter_by(project_id=project_id).order_by(Character.name).all()
+    return jsonify([c.to_dict() for c in chars])
+
+@app.route('/api/projects/<int:project_id>/characters', methods=['POST'])
+def create_character(project_id):
+    Project.query.get_or_404(project_id)
+    data = request.get_json()
+    if not data or not data.get('name'):
+        return jsonify({'error': 'Name required'}), 400
+    char = Character(
+        project_id  = project_id,
+        name        = data['name'],
+        role        = data.get('role', ''),
+        age         = data.get('age', ''),
+        personality = data.get('personality', ''),
+        backstory   = data.get('backstory', ''),
+        appearance  = data.get('appearance', ''),
+        image_url   = data.get('image_url', ''),
+        extra_notes = data.get('extra_notes', '')
+    )
+    db.session.add(char)
+    db.session.commit()
+    return jsonify(char.to_dict()), 201
+
+@app.route('/api/characters/<int:char_id>', methods=['GET'])
+def get_character(char_id):
+    return jsonify(Character.query.get_or_404(char_id).to_dict())
+
+@app.route('/api/characters/<int:char_id>', methods=['PUT'])
+def update_character(char_id):
+    char = Character.query.get_or_404(char_id)
+    data = request.get_json()
+    for field in ['name', 'role', 'age', 'personality', 'backstory', 'appearance', 'image_url', 'extra_notes']:
+        if field in data:
+            setattr(char, field, data[field])
+    db.session.commit()
+    return jsonify(char.to_dict())
+
+@app.route('/api/characters/<int:char_id>', methods=['DELETE'])
+def delete_character(char_id):
+    char = Character.query.get_or_404(char_id)
+    db.session.delete(char)
+    db.session.commit()
+    return jsonify({'message': 'Deleted'})
+
+
+# =============================================
+# SCENE ROUTES
+# =============================================
+
+@app.route('/api/projects/<int:project_id>/scenes', methods=['GET'])
+def get_scenes(project_id):
+    Project.query.get_or_404(project_id)
+    scenes = Scene.query.filter_by(project_id=project_id).order_by(Scene.updated_at.desc()).all()
+    return jsonify([s.to_dict() for s in scenes])
+
+@app.route('/api/projects/<int:project_id>/scenes', methods=['POST'])
+def create_scene(project_id):
+    Project.query.get_or_404(project_id)
+    data = request.get_json()
+    if not data or not data.get('title'):
+        return jsonify({'error': 'Title required'}), 400
+    scene = Scene(
+        project_id        = project_id,
+        title             = data['title'],
+        content           = data.get('content', ''),
+        mood              = data.get('mood', ''),
+        connected_chapter = data.get('connected_chapter', '')
+    )
+    db.session.add(scene)
+    db.session.commit()
+    return jsonify(scene.to_dict()), 201
+
+@app.route('/api/scenes/<int:scene_id>', methods=['GET'])
+def get_scene(scene_id):
+    return jsonify(Scene.query.get_or_404(scene_id).to_dict())
+
+@app.route('/api/scenes/<int:scene_id>', methods=['PUT'])
+def update_scene(scene_id):
+    scene = Scene.query.get_or_404(scene_id)
+    data  = request.get_json()
+    for field in ['title', 'content', 'mood', 'connected_chapter']:
+        if field in data:
+            setattr(scene, field, data[field])
+    scene.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(scene.to_dict())
+
+@app.route('/api/scenes/<int:scene_id>', methods=['DELETE'])
+def delete_scene(scene_id):
+    scene = Scene.query.get_or_404(scene_id)
+    db.session.delete(scene)
+    db.session.commit()
+    return jsonify({'message': 'Deleted'})
+
+
+# =============================================
+# LORE ROUTES
+# =============================================
+
+@app.route('/api/projects/<int:project_id>/lore', methods=['GET'])
+def get_lore(project_id):
+    Project.query.get_or_404(project_id)
+    items = LoreItem.query.filter_by(project_id=project_id).order_by(LoreItem.name).all()
+    return jsonify([i.to_dict() for i in items])
+
+@app.route('/api/projects/<int:project_id>/lore', methods=['POST'])
+def create_lore(project_id):
+    Project.query.get_or_404(project_id)
+    data = request.get_json()
+    if not data or not data.get('name'):
+        return jsonify({'error': 'Name required'}), 400
+    item = LoreItem(
+        project_id  = project_id,
+        name        = data['name'],
+        category    = data.get('category', 'item'),
+        description = data.get('description', ''),
+        image_url   = data.get('image_url', ''),
+        extra_notes = data.get('extra_notes', '')
+    )
+    db.session.add(item)
+    db.session.commit()
+    return jsonify(item.to_dict()), 201
+
+@app.route('/api/lore/<int:item_id>', methods=['GET'])
+def get_lore_item(item_id):
+    return jsonify(LoreItem.query.get_or_404(item_id).to_dict())
+
+@app.route('/api/lore/<int:item_id>', methods=['PUT'])
+def update_lore_item(item_id):
+    item = LoreItem.query.get_or_404(item_id)
+    data = request.get_json()
+    for field in ['name', 'category', 'description', 'image_url', 'extra_notes']:
+        if field in data:
+            setattr(item, field, data[field])
+    db.session.commit()
+    return jsonify(item.to_dict())
+
+@app.route('/api/lore/<int:item_id>', methods=['DELETE'])
+def delete_lore_item(item_id):
+    item = LoreItem.query.get_or_404(item_id)
+    db.session.delete(item)
+    db.session.commit()
+    return jsonify({'message': 'Deleted'})
+
+
+# =============================================
+# WIKI TOOLTIP ROUTE
+# Returns all names (characters + lore) for a project
+# Used by the hover tooltip system in the editor
+# =============================================
+
+@app.route('/api/projects/<int:project_id>/wiki', methods=['GET'])
+def get_wiki_data(project_id):
+    """Returns all characters and lore items for tooltip detection"""
+    chars = Character.query.filter_by(project_id=project_id).all()
+    lore  = LoreItem.query.filter_by(project_id=project_id).all()
+
+    wiki = {}
+    for c in chars:
+        wiki[c.name.lower()] = {
+            'type':      'character',
+            'name':      c.name,
+            'role':      c.role,
+            'age':       c.age,
+            'image_url': c.image_url,
+            'summary':   c.personality[:150] + '...' if len(c.personality) > 150 else c.personality,
+            'id':        c.id
+        }
+    for l in lore:
+        wiki[l.name.lower()] = {
+            'type':      'lore',
+            'name':      l.name,
+            'category':  l.category,
+            'image_url': l.image_url,
+            'summary':   l.description[:150] + '...' if len(l.description) > 150 else l.description,
+            'id':        l.id
+        }
+    return jsonify(wiki)
 # =============================================
 # GOOGLE DRIVE SYNC ROUTE
 # =============================================

@@ -880,3 +880,273 @@ body { display: flex; height: 100vh; }
     border-radius: 4px;
     border: 1px solid var(--border);
 }
+/* =============================================
+   PROJECT TABS
+   ============================================= */
+.project-detail { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+.project-detail-header {
+    padding: 10px 12px 6px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.btn-back {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-family: var(--font-ui);
+    font-size: 12px;
+    cursor: pointer;
+    padding: 3px 0;
+    transition: color var(--transition);
+    display: block;
+    margin-bottom: 4px;
+}
+.btn-back:hover { color: var(--accent-bright); }
+
+.current-project-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+}
+
+.project-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    padding: 0 8px;
+    gap: 2px;
+}
+
+.tab-btn {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-muted);
+    font-family: var(--font-ui);
+    font-size: 12px;
+    padding: 8px 10px;
+    cursor: pointer;
+    transition: color var(--transition), border-color var(--transition);
+    white-space: nowrap;
+    margin-bottom: -1px;
+}
+.tab-btn:hover  { color: var(--text-secondary); }
+.tab-btn.active { color: var(--accent-bright); border-bottom-color: var(--accent-bright); }
+.tab-btn.hidden { display: none; }
+
+.tab-content { display: none; flex: 1; overflow-y: auto; flex-direction: column; }
+.tab-content.active { display: flex; }
+
+.tab-actions {
+    padding: 10px 12px 6px;
+    flex-shrink: 0;
+}
+
+.btn-tab-add {
+    width: 100%;
+    background: none;
+    border: 1px dashed var(--border);
+    color: var(--text-muted);
+    font-family: var(--font-ui);
+    font-size: 12px;
+    padding: 7px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: border-color var(--transition), color var(--transition);
+}
+.btn-tab-add:hover { border-color: var(--accent); color: var(--accent-bright); }
+
+/* Item list (chapters, scenes, lore) */
+.item-list {
+    list-style: none;
+    padding: 2px 8px 12px;
+    overflow-y: auto;
+}
+
+.item-list-entry {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background var(--transition);
+    margin-bottom: 1px;
+    position: relative;
+}
+.item-list-entry:hover { background: var(--bg-hover); }
+.item-list-entry.active { background: var(--accent-soft); border-left: 2px solid var(--accent-bright); padding-left: 8px; }
+
+.item-list-entry .item-name { font-size: 13px; color: var(--text-primary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-list-entry .item-badge { font-size: 10px; color: var(--text-muted); background: var(--bg-elevated); padding: 2px 6px; border-radius: 10px; flex-shrink: 0; }
+.item-list-entry .item-delete { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px; padding: 2px 5px; border-radius: 4px; opacity: 0; transition: opacity var(--transition), color var(--transition); flex-shrink: 0; }
+.item-list-entry:hover .item-delete { opacity: 1; }
+.item-list-entry .item-delete:hover { color: #e07070; }
+
+/* Character card hover preview */
+.char-preview {
+    position: relative;
+}
+.char-preview-card {
+    position: absolute;
+    left: calc(100% + 8px);
+    top: 0;
+    width: 220px;
+    background: var(--bg-modal);
+    border: 1px solid var(--border-accent);
+    border-radius: var(--radius);
+    padding: 14px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    z-index: 50;
+    display: none;
+    animation: fadeUp 0.15s ease both;
+}
+.char-preview:hover .char-preview-card { display: block; }
+
+.char-card-img {
+    width: 100%;
+    height: 120px;
+    object-fit: cover;
+    border-radius: 6px;
+    margin-bottom: 10px;
+    background: var(--bg-elevated);
+}
+.char-card-name { font-family: var(--font-display); font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 2px; }
+.char-card-role { font-size: 11px; color: var(--accent-bright); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+.char-card-summary { font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+
+/* VS Code style open tabs bar */
+.tabs-bar {
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    flex-shrink: 0;
+}
+.tabs-bar::-webkit-scrollbar { height: 3px; }
+
+.open-tabs {
+    display: flex;
+    align-items: stretch;
+    min-height: 36px;
+}
+
+.open-tab {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 14px;
+    font-size: 12px;
+    font-family: var(--font-ui);
+    color: var(--text-muted);
+    border-right: 1px solid var(--border);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background var(--transition), color var(--transition);
+    min-width: 100px;
+    max-width: 180px;
+    position: relative;
+    border-bottom: 2px solid transparent;
+}
+.open-tab:hover { background: var(--bg-hover); color: var(--text-secondary); }
+.open-tab.active { background: var(--bg-base); color: var(--text-primary); border-bottom-color: var(--accent-bright); }
+
+.open-tab-name { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+
+.open-tab-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 1px 3px;
+    border-radius: 3px;
+    opacity: 0;
+    transition: opacity var(--transition), color var(--transition);
+    flex-shrink: 0;
+}
+.open-tab:hover .open-tab-close,
+.open-tab.active .open-tab-close { opacity: 1; }
+.open-tab-close:hover { color: #e07070; background: rgba(224,112,112,0.1); }
+
+/* Wiki tooltip */
+.wiki-tooltip {
+    position: fixed;
+    z-index: 200;
+    pointer-events: none;
+    animation: fadeUp 0.15s ease both;
+}
+.wiki-tooltip-inner {
+    background: var(--bg-modal);
+    border: 1px solid var(--border-accent);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    max-width: 240px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+}
+.wiki-tooltip-img img {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid var(--border-accent);
+}
+.wiki-tooltip-name { font-family: var(--font-display); font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 2px; }
+.wiki-tooltip-type { font-size: 10px; color: var(--accent-bright); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+.wiki-tooltip-summary { font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+
+/* Modal additions */
+.modal-wide { max-width: 600px; width: 92vw; }
+.modal-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 4px; }
+.modal-textarea-sm { min-height: 60px !important; }
+.modal-select {
+    width: 100%;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    padding: 10px 13px;
+    outline: none;
+    margin-bottom: 16px;
+    transition: border-color var(--transition);
+    cursor: pointer;
+}
+.modal-select:focus { border-color: var(--accent); }
+.modal-select option { background: var(--bg-elevated); }
+
+.modal-genre-note {
+    font-size: 12px;
+    color: var(--accent-bright);
+    margin: -10px 0 14px;
+    padding: 6px 10px;
+    background: var(--accent-soft);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-accent);
+}
+
+/* Logo mark update */
+.logo-mark {
+    width: 26px;
+    height: 26px;
+    background: var(--gradient);
+    border-radius: 7px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 700;
+    color: white;
+    flex-shrink: 0;
+}
