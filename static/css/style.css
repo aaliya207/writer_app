@@ -848,3 +848,35 @@ body { display: flex; height: 100vh; }
 .btn-drive.syncing  { border-color: #fbbc04; color: #fbbc04; }
 .btn-drive.synced   { border-color: #34a853; color: #34a853; }
 .btn-drive.error    { border-color: #ea4335; color: #ea4335; }
+/* =============================================
+   EDITOR STATS BAR
+   ============================================= */
+.editor-stats-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 15%;
+    border-top: 1px solid var(--border);
+    background: var(--bg-surface);
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--font-ui);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+.stats-divider {
+    color: var(--text-faint);
+}
+
+/* Keyboard shortcut hint */
+.shortcut-hint {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-faint);
+    font-family: monospace;
+    background: var(--bg-elevated);
+    padding: 2px 7px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+}

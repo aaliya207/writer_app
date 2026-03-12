@@ -2,31 +2,36 @@
 // SCRIPVIA — Main Frontend Logic
 // =============================================
 
-let currentProjectId = null;
-let currentDocId = null;
-let quill = null;
-let autoSaveTimer = null;      // Holds the 30s interval
-let localBackupTimer = null;   // Holds the localStorage debounce timer
-let countdownTimer = null;     // Countdown display timer
-let secondsUntilSave = 30;     // Countdown counter
+// --- STATE ---
+let currentProjectId  = null;
+let currentDocId      = null;
+let quill             = null;
+let autoSaveTimer     = null;
+let countdownTimer    = null;
+let secondsUntilSave  = 30;
+let pendingSync       = false;  // True when offline changes need syncing
 
-// DOM refs
-const projectsList    = document.getElementById('projectsList');
-const documentsList   = document.getElementById('documentsList');
-const documentsNav    = document.getElementById('documentsNav');
-const welcomeScreen   = document.getElementById('welcomeScreen');
-const editorWrapper   = document.getElementById('editorWrapper');
-const docTitleInput   = document.getElementById('docTitleInput');
-const saveStatus      = document.getElementById('saveStatus');
-const saveBtn         = document.getElementById('saveBtn');
-const exportPdfBtn    = document.getElementById('exportPdfBtn');
-const exportDocxBtn   = document.getElementById('exportDocxBtn');
-const syncDriveBtn    = document.getElementById('syncDriveBtn');
+// --- DOM REFS ---
+const projectsList     = document.getElementById('projectsList');
+const documentsList    = document.getElementById('documentsList');
+const documentsNav     = document.getElementById('documentsNav');
+const welcomeScreen    = document.getElementById('welcomeScreen');
+const editorWrapper    = document.getElementById('editorWrapper');
+const docTitleInput    = document.getElementById('docTitleInput');
+const saveStatus       = document.getElementById('saveStatus');
+const saveBtn          = document.getElementById('saveBtn');
+const exportPdfBtn     = document.getElementById('exportPdfBtn');
+const exportDocxBtn    = document.getElementById('exportDocxBtn');
+const syncDriveBtn     = document.getElementById('syncDriveBtn');
+const wordCountEl      = document.getElementById('wordCount');
+const charCountEl      = document.getElementById('charCount');
+const readTimeEl       = document.getElementById('readTime');
+const lastSavedTimeEl  = document.getElementById('lastSavedTime');
 
-const newProjectModal   = document.getElementById('newProjectModal');
-const newDocModal       = document.getElementById('newDocModal');
-const projectTitleInput = document.getElementById('projectTitleInput');
-const projectDescInput  = document.getElementById('projectDescInput');
+const newProjectModal    = document.getElementById('newProjectModal');
+const newDocModal        = document.getElementById('newDocModal');
+const projectTitleInput  = document.getElementById('projectTitleInput');
+const projectDescInput   = document.getElementById('projectDescInput');
 const docTitleModalInput = document.getElementById('docTitleModalInput');
 
 // =============================================
@@ -49,11 +54,36 @@ function initQuill() {
         }
     });
 
-quill.on('text-change', () => {
-    setSaveStatus('unsaved');
-    saveToLocalStorage();      // Instantly backup to localStorage on every keystroke
-    resetCountdown();          // Reset the 30s countdown on activity
-});
+    quill.on('text-change', () => {
+        setSaveStatus('unsaved');
+        saveToLocalStorage();
+        resetCountdown();
+        updateStats();  // Update word/char count on every keystroke
+    });
+}
+
+// =============================================
+// STATS — Word count, char count, read time
+// =============================================
+function updateStats() {
+    if (!quill) return;
+
+    const text     = quill.getText().trim();
+    const words    = text ? text.split(/\s+/).filter(w => w.length > 0) : [];
+    const wordCount = words.length;
+    const charCount = text.length;
+    const readTime  = Math.max(1, Math.ceil(wordCount / 200)); // ~200 wpm average
+
+    if (wordCountEl) wordCountEl.textContent = `${wordCount.toLocaleString()} word${wordCount !== 1 ? 's' : ''}`;
+    if (charCountEl) charCountEl.textContent = `${charCount.toLocaleString()} character${charCount !== 1 ? 's' : ''}`;
+    if (readTimeEl)  readTimeEl.textContent  = `~${readTime} min read`;
+}
+
+function updateLastSaved() {
+    if (!lastSavedTimeEl) return;
+    const now  = new Date();
+    const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    lastSavedTimeEl.textContent = `Saved at ${time}`;
 }
 
 // =============================================
@@ -101,7 +131,7 @@ async function createProject() {
         });
         closeModal(newProjectModal);
         projectTitleInput.value = '';
-        projectDescInput.value = '';
+        projectDescInput.value  = '';
         await loadProjects();
         selectProject(p.id);
     } catch(e) { console.error('createProject:', e); }
@@ -113,7 +143,8 @@ async function deleteProject(event, id) {
     try {
         await api('DELETE', `/api/projects/${id}`);
         if (currentProjectId === id) {
-            currentProjectId = null; currentDocId = null;
+            currentProjectId = null;
+            currentDocId     = null;
             hideEditor();
             documentsNav.style.display = 'none';
         }
@@ -123,7 +154,7 @@ async function deleteProject(event, id) {
 
 async function selectProject(id) {
     currentProjectId = id;
-    currentDocId = null;
+    currentDocId     = null;
     await loadProjects();
     await loadDocuments(id);
     documentsNav.style.display = 'block';
@@ -171,21 +202,20 @@ async function openDocument(id) {
     try {
         const doc = await api('GET', `/api/documents/${id}`);
         currentDocId = id;
-        docTitleInput.value = doc.title;
+
+        docTitleInput.value    = doc.title;
         docTitleInput.disabled = false;
 
-        // Load server content first
         quill.root.innerHTML = doc.content || '';
         quill.history.clear();
 
         showEditor();
         enableHeaderBtns(true);
 
-        // Check if there's a newer localStorage backup to restore
         const restored = checkLocalStorageRestore(id, doc.content || '');
         if (!restored) setSaveStatus('saved');
 
-        // Start the 30s auto-save cycle
+        updateStats();
         startAutoSave();
 
         await loadDocuments(currentProjectId);
@@ -197,13 +227,34 @@ async function saveDocument() {
     setSaveStatus('saving');
     try {
         await api('PUT', `/api/documents/${currentDocId}`, {
-            title: docTitleInput.value.trim() || 'Untitled',
+            title:   docTitleInput.value.trim() || 'Untitled',
             content: quill.root.innerHTML
         });
-        setSaveStatus('saved');
-        clearLocalStorage(currentDocId); // Server has latest, no need for backup
+
+        clearLocalStorage(currentDocId);
+        updateLastSaved();
         await loadDocuments(currentProjectId);
-    } catch(e) { setSaveStatus('error'); console.error('saveDocument:', e); }
+
+        // Sync to Drive if online
+        if (navigator.onLine) {
+            setSaveStatus('syncing');
+            try {
+                await api('POST', `/api/documents/${currentDocId}/sync`);
+                setSaveStatus('synced');
+                setTimeout(() => setSaveStatus('saved'), 2000);
+            } catch(e) {
+                setSaveStatus('saved');
+                console.warn('Drive sync failed:', e);
+            }
+        } else {
+            setSaveStatus('saved');
+            pendingSync = true;
+        }
+
+    } catch(e) {
+        setSaveStatus('error');
+        console.error('saveDocument:', e);
+    }
 }
 
 async function deleteDocument(event, id) {
@@ -221,6 +272,108 @@ async function deleteDocument(event, id) {
 }
 
 // =============================================
+// AUTO-SAVE & LOCALSTORAGE
+// =============================================
+function getLocalKey(docId)         { return `scripvia_doc_${docId}`; }
+
+function saveToLocalStorage() {
+    if (!currentDocId || !quill) return;
+    try {
+        localStorage.setItem(getLocalKey(currentDocId), JSON.stringify({
+            title:   docTitleInput.value,
+            content: quill.root.innerHTML,
+            savedAt: Date.now()
+        }));
+    } catch(e) { console.warn('localStorage backup failed:', e); }
+}
+
+function loadFromLocalStorage(docId) {
+    try {
+        const raw = localStorage.getItem(getLocalKey(docId));
+        return raw ? JSON.parse(raw) : null;
+    } catch(e) { return null; }
+}
+
+function clearLocalStorage(docId) {
+    try { localStorage.removeItem(getLocalKey(docId)); } catch(e) {}
+}
+
+function checkLocalStorageRestore(docId, serverContent) {
+    const backup = loadFromLocalStorage(docId);
+    if (!backup) return false;
+
+    const isRecent = (Date.now() - backup.savedAt) < 24 * 60 * 60 * 1000;
+    if (!isRecent) { clearLocalStorage(docId); return false; }
+
+    if (backup.content !== serverContent) {
+        const timeAgo = formatTimeAgo(backup.savedAt);
+        const restore = confirm(`📋 Unsaved changes found from ${timeAgo}.\n\nRestore them?`);
+        if (restore) {
+            quill.root.innerHTML = backup.content || '';
+            docTitleInput.value  = backup.title || '';
+            setSaveStatus('unsaved');
+            return true;
+        } else {
+            clearLocalStorage(docId);
+        }
+    }
+    return false;
+}
+
+function formatTimeAgo(timestamp) {
+    const diff = Math.floor((Date.now() - timestamp) / 1000);
+    if (diff < 60)   return `${diff} seconds ago`;
+    if (diff < 3600) return `${Math.floor(diff / 60)} minutes ago`;
+    return `${Math.floor(diff / 3600)} hours ago`;
+}
+
+function startAutoSave() {
+    stopAutoSave();
+    secondsUntilSave = 30;
+
+    countdownTimer = setInterval(() => {
+        secondsUntilSave--;
+        if (saveStatus.classList.contains('unsaved') && secondsUntilSave > 0) {
+            saveStatus.textContent = `● Saving in ${secondsUntilSave}s`;
+        }
+        if (secondsUntilSave <= 0) secondsUntilSave = 30;
+    }, 1000);
+
+    autoSaveTimer = setInterval(async () => {
+        if (currentDocId && saveStatus.classList.contains('unsaved')) {
+            await saveDocument();
+            clearLocalStorage(currentDocId);
+        }
+    }, 30000);
+}
+
+function stopAutoSave() {
+    if (autoSaveTimer)  { clearInterval(autoSaveTimer);  autoSaveTimer  = null; }
+    if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+    secondsUntilSave = 30;
+}
+
+function resetCountdown() { secondsUntilSave = 30; }
+
+// =============================================
+// OFFLINE / ONLINE DETECTION
+// =============================================
+window.addEventListener('online', async () => {
+    console.log('🟢 Back online');
+    if (pendingSync && currentDocId) {
+        setSaveStatus('syncing');
+        try {
+            await saveDocument();
+            pendingSync = false;
+        } catch(e) { console.error('Failed to sync on reconnect:', e); }
+    }
+});
+
+window.addEventListener('offline', () => {
+    console.log('🔴 Gone offline — will sync on reconnect');
+});
+
+// =============================================
 // UI HELPERS
 // =============================================
 function showEditor() {
@@ -229,36 +382,52 @@ function showEditor() {
 }
 
 function hideEditor() {
-    stopAutoSave(); // Stop the interval when leaving a doc
+    stopAutoSave();
     welcomeScreen.classList.remove('hidden');
     editorWrapper.classList.remove('visible');
-    docTitleInput.value = '';
+    docTitleInput.value    = '';
     docTitleInput.disabled = true;
     if (quill) quill.root.innerHTML = '';
     setSaveStatus('');
+    if (wordCountEl)     wordCountEl.textContent    = '0 words';
+    if (charCountEl)     charCountEl.textContent    = '0 characters';
+    if (readTimeEl)      readTimeEl.textContent     = '~0 min read';
+    if (lastSavedTimeEl) lastSavedTimeEl.textContent = 'Never saved';
 }
 
 function setSaveStatus(status) {
-    const map = { saved: '✓ Saved', saving: 'Saving...', unsaved: '● Unsaved', error: '✗ Error', '': '' };
+    const map = {
+        saved:   '✓ Saved',
+        saving:  'Saving...',
+        syncing: '↑ Syncing...',
+        synced:  '✓ Synced',
+        unsaved: '● Unsaved',
+        error:   '✗ Error',
+        '':      ''
+    };
     saveStatus.textContent = map[status] ?? status;
-    saveStatus.className = 'save-status ' + status;
+    saveStatus.className   = 'save-status ' + status;
 }
 
 function enableHeaderBtns(on) {
-    saveBtn.disabled      = !on;
-    exportPdfBtn.disabled = !on;
-    exportDocxBtn.disabled= !on;
-    syncDriveBtn.disabled = !on;
+    saveBtn.disabled       = !on;
+    exportPdfBtn.disabled  = !on;
+    exportDocxBtn.disabled = !on;
+    syncDriveBtn.disabled  = !on;
 }
 
 function escapeHtml(str) {
-    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
 }
 
 // =============================================
 // MODALS
 // =============================================
-function openModal(modal) { modal.classList.add('active'); }
+function openModal(modal)  { modal.classList.add('active'); }
 function closeModal(modal) { modal.classList.remove('active'); }
 
 document.querySelectorAll('.modal-overlay').forEach(o => {
@@ -266,22 +435,97 @@ document.querySelectorAll('.modal-overlay').forEach(o => {
 });
 
 // =============================================
-// DARK MODE
+// DARK MODE — persists across refreshes
 // =============================================
-let isDark = true;
-document.getElementById('darkModeToggle').addEventListener('click', () => {
-    isDark = !isDark;
+let isDark = localStorage.getItem('scripvia_theme') !== 'light';
+
+function applyTheme() {
     document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
     document.getElementById('themeIcon').textContent  = isDark ? '🌙' : '☀️';
     document.getElementById('themeLabel').textContent = isDark ? 'Dark' : 'Light';
+    localStorage.setItem('scripvia_theme', isDark ? 'dark' : 'light');
+}
+
+document.getElementById('darkModeToggle').addEventListener('click', () => {
+    isDark = !isDark;
+    applyTheme();
 });
 
 // =============================================
-// SIDEBAR COLLAPSE
+// SIDEBAR COLLAPSE — persists too
 // =============================================
+const sidebar = document.getElementById('sidebar');
+let sidebarCollapsed = localStorage.getItem('scripvia_sidebar') === 'collapsed';
+
+function applySidebar() {
+    sidebar.classList.toggle('collapsed', sidebarCollapsed);
+    localStorage.setItem('scripvia_sidebar', sidebarCollapsed ? 'collapsed' : 'open');
+}
+
 document.getElementById('sidebarToggle').addEventListener('click', () => {
-    document.getElementById('sidebar').classList.toggle('collapsed');
+    sidebarCollapsed = !sidebarCollapsed;
+    applySidebar();
 });
+
+// =============================================
+// KEYBOARD SHORTCUTS
+// =============================================
+document.addEventListener('keydown', (e) => {
+    // Ctrl+S or Cmd+S → Save
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault(); // Stop browser's default save dialog
+        if (currentDocId) saveDocument();
+    }
+
+    // Escape → Close any open modal
+    if (e.key === 'Escape') {
+        document.querySelectorAll('.modal-overlay.active').forEach(m => closeModal(m));
+    }
+});
+
+// =============================================
+// GOOGLE DRIVE SYNC BUTTON
+// =============================================
+async function syncToDrive() {
+    if (!currentDocId) return;
+    await saveDocument();
+}
+
+// =============================================
+// EXPORT
+// =============================================
+exportPdfBtn.addEventListener('click', () => {
+    if (!currentDocId) return;
+    window.location.href = `/api/documents/${currentDocId}/export/pdf`;
+});
+
+exportDocxBtn.addEventListener('click', () => {
+    if (!currentDocId) return;
+    window.location.href = `/api/documents/${currentDocId}/export/docx`;
+});
+
+// =============================================
+// AUTH
+// =============================================
+async function checkAuthState() {
+    try {
+        const data      = await api('GET', '/auth/me');
+        const loginBtn  = document.getElementById('loginBtn');
+        const userInfo  = document.getElementById('userInfo');
+        const userAvatar = document.getElementById('userAvatar');
+        const userName  = document.getElementById('userName');
+
+        if (data.logged_in) {
+            loginBtn.style.display = 'none';
+            userInfo.classList.remove('hidden');
+            userAvatar.src       = data.user.picture;
+            userName.textContent = data.user.name.split(' ')[0];
+        } else {
+            loginBtn.style.display = 'flex';
+            userInfo.classList.add('hidden');
+        }
+    } catch(e) { console.error('Auth check failed:', e); }
+}
 
 // =============================================
 // EVENT LISTENERS
@@ -299,239 +543,14 @@ document.getElementById('confirmDocBtn').addEventListener('click', createDocumen
 docTitleModalInput.addEventListener('keydown', e => { if (e.key === 'Enter') createDocument(); });
 
 saveBtn.addEventListener('click', saveDocument);
-exportPdfBtn.addEventListener('click', () => {
-    if (!currentDocId) return;
-    window.location.href = `/api/documents/${currentDocId}/export/pdf`;
-});
-
-exportDocxBtn.addEventListener('click', () => {
-    if (!currentDocId) return;
-    window.location.href = `/api/documents/${currentDocId}/export/docx`;
-});
 syncDriveBtn.addEventListener('click', syncToDrive);
 
-// =============================================
-// AUTO-SAVE & LOCALSTORAGE BACKUP
-// =============================================
-
-// --- localStorage helpers ---
-// We store content with a key based on doc ID so each doc has its own backup
-
-function getLocalKey(docId) {
-    // e.g. "scripvia_doc_42"
-    return `scripvia_doc_${docId}`;
-}
-
-function saveToLocalStorage() {
-    // Called on every keystroke — saves content + title as a safety net
-    if (!currentDocId || !quill) return;
-
-    const backup = {
-        title:     docTitleInput.value,
-        content:   quill.root.innerHTML,
-        savedAt:   Date.now()
-    };
-
-    try {
-        localStorage.setItem(getLocalKey(currentDocId), JSON.stringify(backup));
-    } catch(e) {
-        // localStorage can fail if storage is full
-        console.warn('localStorage backup failed:', e);
-    }
-}
-
-function loadFromLocalStorage(docId) {
-    // Returns the backup object or null if nothing stored
-    try {
-        const raw = localStorage.getItem(getLocalKey(docId));
-        return raw ? JSON.parse(raw) : null;
-    } catch(e) {
-        return null;
-    }
-}
-
-function clearLocalStorage(docId) {
-    // Call this after a successful server save — cleanup old backup
-    try {
-        localStorage.removeItem(getLocalKey(docId));
-    } catch(e) {}
-}
-
-// --- Auto-save interval ---
-
-function startAutoSave() {
-    // Clear any existing timers first (prevents duplicates)
-    stopAutoSave();
-
-    secondsUntilSave = 30;
-
-    // Countdown: tick every second and update status display
-    countdownTimer = setInterval(() => {
-        secondsUntilSave--;
-
-        // Only show countdown if there's unsaved content
-        if (saveStatus.classList.contains('unsaved') && secondsUntilSave > 0) {
-            saveStatus.textContent = `● Saving in ${secondsUntilSave}s`;
-        }
-
-        if (secondsUntilSave <= 0) {
-            secondsUntilSave = 30; // Reset for next cycle
-        }
-    }, 1000);
-
-    // Actual save: every 30 seconds
-    autoSaveTimer = setInterval(async () => {
-        if (currentDocId && saveStatus.classList.contains('unsaved')) {
-            await saveDocument();           // Save to server
-            clearLocalStorage(currentDocId); // Clean up localStorage after server save
-        }
-    }, 30000);
-}
-
-function stopAutoSave() {
-    // Clean up all timers — called when closing a doc or switching docs
-    if (autoSaveTimer)   { clearInterval(autoSaveTimer);   autoSaveTimer = null; }
-    if (countdownTimer)  { clearInterval(countdownTimer);  countdownTimer = null; }
-    secondsUntilSave = 30;
-}
-
-function resetCountdown() {
-    // Reset the 30s countdown whenever the user types
-    secondsUntilSave = 30;
-}
-
-// --- localStorage restore on doc open ---
-
-function checkLocalStorageRestore(docId, serverContent) {
-    const backup = loadFromLocalStorage(docId);
-    if (!backup) return false; // No backup, nothing to do
-
-    // Only offer restore if backup is NEWER than server content
-    // (i.e. user had unsaved changes when app closed)
-    const backupAge = Date.now() - backup.savedAt;
-    const isRecent = backupAge < 24 * 60 * 60 * 1000; // Within last 24 hours
-
-    if (!isRecent) {
-        clearLocalStorage(docId); // Old backup, discard it
-        return false;
-    }
-
-    // If backup content differs from server, ask user if they want to restore
-    if (backup.content !== serverContent) {
-        const timeAgo = formatTimeAgo(backup.savedAt);
-        const restore = confirm(
-            `📋 Unsaved changes found from ${timeAgo}.\n\nRestore them? (Cancel to keep the server version)`
-        );
-
-        if (restore) {
-            quill.root.innerHTML = backup.content || '';
-            docTitleInput.value  = backup.title || '';
-            setSaveStatus('unsaved');
-            return true;
-        } else {
-            clearLocalStorage(docId); // User declined, clean up
-        }
-    }
-
-    return false;
-}
-
-function formatTimeAgo(timestamp) {
-    const diff = Math.floor((Date.now() - timestamp) / 1000);
-    if (diff < 60)   return `${diff} seconds ago`;
-    if (diff < 3600) return `${Math.floor(diff / 60)} minutes ago`;
-    return `${Math.floor(diff / 3600)} hours ago`;
-}
-// =============================================
-// GOOGLE DRIVE SYNC
-// =============================================
-
-async function syncToDrive() {
-    if (!currentDocId) return;
-
-    // First save to server, then sync to Drive
-    await saveDocument();
-
-    syncDriveBtn.classList.remove('synced', 'error');
-    syncDriveBtn.classList.add('syncing');
-    syncDriveBtn.innerHTML = `
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
-        </svg>
-        Syncing...`;
-
-    try {
-        const result = await api('POST', `/api/documents/${currentDocId}/sync`);
-
-        syncDriveBtn.classList.remove('syncing');
-        syncDriveBtn.classList.add('synced');
-        syncDriveBtn.innerHTML = `
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
-            </svg>
-            Synced!`;
-
-        // Reset button after 3 seconds
-        setTimeout(() => {
-            syncDriveBtn.classList.remove('synced');
-            syncDriveBtn.innerHTML = `
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M6.28 3L1 12.14 6.28 21h11.44L23 12.14 17.72 3H6.28zm.94 2h9.56l4.5 7.14-4.5 7.14H7.22l-4.5-7.14L7.22 5zM12 8l-4 7h8l-4-7z"/>
-                </svg>
-                Sync`;
-        }, 3000);
-
-    } catch(e) {
-        syncDriveBtn.classList.remove('syncing');
-        syncDriveBtn.classList.add('error');
-        syncDriveBtn.innerHTML = `
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
-            </svg>
-            Failed`;
-
-        setTimeout(() => {
-            syncDriveBtn.classList.remove('error');
-            syncDriveBtn.innerHTML = `
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M6.28 3L1 12.14 6.28 21h11.44L23 12.14 17.72 3H6.28zm.94 2h9.56l4.5 7.14-4.5 7.14H7.22l-4.5-7.14L7.22 5zM12 8l-4 7h8l-4-7z"/>
-                </svg>
-                Sync`;
-        }, 3000);
-
-        console.error('Drive sync failed:', e);
-    }
-}
-// =============================================
-// AUTH — Check login state on page load
-// =============================================
-async function checkAuthState() {
-    try {
-        const data = await api('GET', '/auth/me');
-        const loginBtn  = document.getElementById('loginBtn');
-        const userInfo  = document.getElementById('userInfo');
-        const userAvatar = document.getElementById('userAvatar');
-        const userName  = document.getElementById('userName');
-
-        if (data.logged_in) {
-            // Show user info, hide login button
-            loginBtn.style.display  = 'none';
-            userInfo.classList.remove('hidden');
-            userAvatar.src = data.user.picture;
-            userName.textContent = data.user.name.split(' ')[0]; // First name only
-        } else {
-            // Show login button, hide user info
-            loginBtn.style.display  = 'flex';
-            userInfo.classList.add('hidden');
-        }
-    } catch(e) {
-        console.error('Auth check failed:', e);
-    }
-}
 // =============================================
 // INIT
 // =============================================
 document.addEventListener('DOMContentLoaded', () => {
+    applyTheme();    // Apply saved theme before anything renders
+    applySidebar();  // Apply saved sidebar state
     initQuill();
     loadProjects();
     checkAuthState();
