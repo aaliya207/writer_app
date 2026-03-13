@@ -86,6 +86,7 @@ class Document(db.Model):
     content       = db.Column(db.Text, default='')
     project_id    = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
     drive_file_id = db.Column(db.String(200), default='')  # This document's file on Drive
+    order_index    = db.Column(db.Integer, default=0)
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at    = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -388,6 +389,44 @@ def get_projects():
     projects = Project.query.order_by(Project.updated_at.desc()).all()
     return jsonify([p.to_dict() for p in projects])
 
+@app.route('/api/projects/<int:project_id>/stats', methods=['GET'])
+def get_project_stats(project_id):
+    project = Project.query.get_or_404(project_id)
+    
+    # Word count across all documents
+    total_words = 0
+    for doc in project.documents:
+        if doc.content:
+            text = html_to_plain_text(doc.content)
+            total_words += len(text.split()) if text.strip() else 0
+
+    # Scene word count too
+    scene_words = 0
+    for scene in project.scenes:
+        if scene.content:
+            text = html_to_plain_text(scene.content)
+            scene_words += len(text.split()) if text.strip() else 0
+
+    # Last edited
+    all_dates = [project.updated_at]
+    for doc in project.documents:
+        all_dates.append(doc.updated_at)
+    last_edited = max(all_dates).isoformat() if all_dates else None
+
+    return jsonify({
+        'id':              project.id,
+        'title':           project.title,
+        'description':     project.description,
+        'genre':           project.genre,
+        'is_creative':     project.genre in Project.CREATIVE_GENRES,
+        'chapter_count':   len(project.documents),
+        'character_count': len(project.characters),
+        'scene_count':     len(project.scenes),
+        'lore_count':      len(project.lore_items),
+        'total_words':     total_words + scene_words,
+        'last_edited':     last_edited,
+        'created_at':      project.created_at.isoformat()
+    })
 
 @app.route('/api/projects', methods=['POST'])
 def create_project():
@@ -467,9 +506,24 @@ def delete_project(project_id):
 @app.route('/api/projects/<int:project_id>/documents', methods=['GET'])
 def get_documents(project_id):
     Project.query.get_or_404(project_id)
-    docs = Document.query.filter_by(project_id=project_id).order_by(Document.updated_at.desc()).all()
+    docs = Document.query.filter_by(project_id=project_id).order_by(Document.order_index.asc(), Document.created_at.asc()).all()
     return jsonify([d.to_dict() for d in docs])
 
+@app.route('/api/projects/<int:project_id>/documents/reorder', methods=['POST'])
+def reorder_documents(project_id):
+    """Accepts a list of doc IDs in new order and updates order_index"""
+    Project.query.get_or_404(project_id)
+    data = request.get_json()
+    if not data or 'order' not in data:
+        return jsonify({'error': 'order required'}), 400
+
+    for index, doc_id in enumerate(data['order']):
+        doc = Document.query.get(doc_id)
+        if doc and doc.project_id == project_id:
+            doc.order_index = index
+
+    db.session.commit()
+    return jsonify({'message': 'Reordered'})
 
 @app.route('/api/projects/<int:project_id>/documents', methods=['POST'])
 def create_document(project_id):
@@ -478,7 +532,17 @@ def create_document(project_id):
     if not data or not data.get('title'):
         return jsonify({'error': 'Title required'}), 400
 
-    doc = Document(title=data['title'], content=data.get('content', ''), project_id=project_id)
+    # Set order_index to end of list
+    last = Document.query.filter_by(project_id=project_id).order_by(Document.order_index.desc()).first()
+    next_order = (last.order_index + 1) if last else 0
+
+    doc = Document(
+        title=data['title'],
+        content=data.get('content', ''),
+        project_id=project_id,
+        drive_file_id='',
+        order_index=next_order
+    )
     db.session.add(doc)
     db.session.commit()
 

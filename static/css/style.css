@@ -1414,3 +1414,198 @@ body { display: flex; height: 100vh; }
     transition: background var(--transition);
 }
 .btn-clear-img:hover { background: rgba(200,50,50,0.7); }
+/* =============================================
+   PROJECT OVERVIEW PAGE
+   ============================================= */
+.project-overview {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    z-index: 5;
+    background: var(--bg-base);
+    animation: fadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.overview-bg-orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(90px);
+    opacity: 0.15;
+    pointer-events: none;
+}
+.ov-orb1 {
+    width: 600px; height: 600px;
+    background: radial-gradient(circle, #7b6fb0, transparent);
+    top: -200px; right: -100px;
+    animation: floatOrb 9s ease-in-out infinite alternate;
+}
+.ov-orb2 {
+    width: 400px; height: 400px;
+    background: radial-gradient(circle, #35598e, transparent);
+    bottom: -100px; left: -100px;
+    animation: floatOrb 11s ease-in-out infinite alternate-reverse;
+}
+
+.overview-inner {
+    position: relative;
+    z-index: 1;
+    max-width: 680px;
+    width: 90%;
+    text-align: center;
+    padding: 40px 0;
+}
+
+.overview-genre-badge {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent-bright);
+    background: var(--accent-soft);
+    border: 1px solid var(--border-accent);
+    padding: 5px 16px;
+    border-radius: 100px;
+    margin-bottom: 20px;
+}
+
+.overview-title {
+    font-family: var(--font-display);
+    font-size: clamp(36px, 6vw, 64px);
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    background: var(--gradient-text);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1.1;
+    margin-bottom: 16px;
+}
+
+.overview-desc {
+    font-size: 15px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    max-width: 480px;
+    margin: 0 auto 36px;
+    font-weight: 300;
+    min-height: 24px;
+}
+
+.overview-stats {
+    display: flex;
+    gap: 0;
+    justify-content: center;
+    margin-bottom: 20px;
+    border: 1px solid var(--border-accent);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: var(--bg-surface);
+}
+
+.ov-stat {
+    flex: 1;
+    padding: 20px 12px;
+    border-right: 1px solid var(--border);
+    transition: background var(--transition);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+.ov-stat:last-child { border-right: none; }
+.ov-stat:hover { background: var(--bg-hover); }
+
+.ov-stat-value {
+    font-family: var(--font-display);
+    font-size: 36px;
+    font-weight: 600;
+    color: var(--accent-bright);
+    line-height: 1.2;
+    margin-bottom: 8px;
+    display: block;
+}
+
+.ov-stat-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+}
+
+.overview-meta {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    margin-bottom: 32px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.overview-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.ov-btn-primary {
+    background: var(--gradient);
+    color: white;
+    border: none;
+    padding: 12px 28px;
+    border-radius: var(--radius);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity var(--transition), transform var(--transition);
+    letter-spacing: 0.03em;
+}
+.ov-btn-primary:hover { opacity: 0.88; transform: translateY(-1px); }
+
+.ov-btn-ghost {
+    background: none;
+    border: 1px solid var(--border-accent);
+    color: var(--text-secondary);
+    padding: 12px 20px;
+    border-radius: var(--radius);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all var(--transition);
+}
+.ov-btn-ghost:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent-bright);
+    transform: translateY(-1px);
+}
+/* =============================================
+   DRAG AND DROP
+   ============================================= */
+.drag-handle {
+    color: var(--text-faint);
+    font-size: 14px;
+    cursor: grab;
+    flex-shrink: 0;
+    padding: 0 2px;
+    transition: color var(--transition);
+    user-select: none;
+}
+.item-list-entry:hover .drag-handle { color: var(--text-muted); }
+.item-list-entry.dragging {
+    opacity: 0.4;
+    background: var(--accent-soft);
+}
+.item-list-entry.drag-over-top {
+    border-top: 2px solid var(--accent-bright);
+}
+.item-list-entry.drag-over-bottom {
+    border-bottom: 2px solid var(--accent-bright);
+}

@@ -49,9 +49,10 @@
 
             <!-- Back button + project name -->
             <div class="project-detail-header">
-                <button class="btn-back" id="backToProjects">← Projects</button>
-                <span class="current-project-name" id="currentProjectName"></span>
-            </div>
+            <button class="btn-back" id="backToProjects">← Projects</button>
+            <button class="btn-back" id="backToOverview" style="display:none;">⊞ Overview</button>
+            <span class="current-project-name" id="currentProjectName"></span>
+        </div>
 
             <!-- Tabs: Chapters / Characters / Scenes / Lore -->
             <div class="project-tabs" id="projectTabs">
@@ -128,7 +129,63 @@
 
     <!-- ========== MAIN EDITOR ========== -->
     <main class="editor-area" id="editorArea">
+        <!-- ========== PROJECT OVERVIEW ========== -->
+        <div class="project-overview" id="projectOverview" style="display:none;">
+            <div class="overview-bg-orb ov-orb1"></div>
+            <div class="overview-bg-orb ov-orb2"></div>
+            <div class="overview-inner">
 
+                <div class="overview-top">
+                    <div class="overview-genre-badge" id="overviewGenre"></div>
+                    <h1 class="overview-title" id="overviewTitle"></h1>
+                    <p class="overview-desc" id="overviewDesc"></p>
+                </div>
+
+                <div class="overview-stats">
+                    <div class="ov-stat">
+                        <div class="ov-stat-value" id="ovWords">0</div>
+                        <div class="ov-stat-label">Words</div>
+                    </div>
+                    <div class="ov-stat">
+                        <div class="ov-stat-value" id="ovChapters">0</div>
+                        <div class="ov-stat-label">Chapters</div>
+                    </div>
+                    <div class="ov-stat" id="ovCharStat">
+                        <div class="ov-stat-value" id="ovCharacters">0</div>
+                        <div class="ov-stat-label">Characters</div>
+                    </div>
+                    <div class="ov-stat" id="ovSceneStat">
+                        <div class="ov-stat-value" id="ovScenes">0</div>
+                        <div class="ov-stat-label">Scenes</div>
+                    </div>
+                    <div class="ov-stat" id="ovLoreStat">
+                        <div class="ov-stat-value" id="ovLore">0</div>
+                        <div class="ov-stat-label">Lore</div>
+                    </div>
+                </div>
+
+                <div class="overview-meta">
+                    <span id="ovLastEdited"></span>
+                    <span id="ovCreated"></span>
+                </div>
+
+                <div class="overview-actions">
+                    <button class="ov-btn-primary" onclick="overviewGoTo('chapters')">
+                        ✍️ Start Writing
+                    </button>
+                    <button class="ov-btn-ghost" id="ovCharBtn" onclick="overviewGoTo('characters')">
+                        👤 Characters
+                    </button>
+                    <button class="ov-btn-ghost" id="ovSceneBtn" onclick="overviewGoTo('scenes')">
+                        ⚡ Scenes
+                    </button>
+                    <button class="ov-btn-ghost" id="ovLoreBtn" onclick="overviewGoTo('lore')">
+                        📖 Lore
+                    </button>
+                </div>
+
+            </div>
+        </div>
         <!-- Open tabs bar (VS Code style) -->
         <div class="tabs-bar" id="tabsBar" style="display:none;">
             <div class="open-tabs" id="openTabs"></div>

@@ -280,6 +280,9 @@ async function selectProject(id) {
         showProjectDetail();
         currentProjectName.textContent = currentProjectData.title;
 
+        // Show overview page
+        await showProjectOverview(id);
+
         // Show/hide creative tabs based on genre
         const isCreative = CREATIVE_GENRES.includes(currentProjectData.genre);
         document.getElementById('tabCharacters').classList.toggle('hidden', !isCreative);
@@ -306,6 +309,90 @@ function showProjectDetail() {
 }
 
 // =============================================
+// PROJECT OVERVIEW
+// =============================================
+async function showProjectOverview(projectId) {
+    try {
+        const stats = await api('GET', `/api/projects/${projectId}/stats`);
+        console.log('last_edited raw:', stats.last_edited);
+        console.log('created_at raw:', stats.created_at);
+        console.log('parsed as UTC:', new Date(stats.last_edited + 'Z'));
+        console.log('parsed without Z:', new Date(stats.last_edited));
+        console.log('local now:', new Date());
+        // Populate
+        const genreEmojis = { fantasy: '⚔️ Fantasy', 'sci-fi': '🚀 Sci-Fi', fiction: '📖 Fiction', romance: '💕 Romance', mystery: '🔍 Mystery', thriller: '⚡ Thriller', horror: '🕯️ Horror', historical: '🏛️ Historical', journal: '📓 Journal', screenplay: '🎬 Screenplay', poetry: '✨ Poetry', general: '📝 General', other: '📌 Other' };
+
+        document.getElementById('overviewGenre').textContent = genreEmojis[stats.genre] || '📝 General';
+        document.getElementById('overviewTitle').textContent = stats.title;
+        document.getElementById('overviewDesc').textContent = stats.description || 'No description yet.';
+        document.getElementById('ovWords').textContent = stats.total_words.toLocaleString();
+        document.getElementById('ovChapters').textContent = stats.chapter_count;
+        document.getElementById('ovCharacters').textContent = stats.character_count;
+        document.getElementById('ovScenes').textContent = stats.scene_count;
+        document.getElementById('ovLore').textContent = stats.lore_count;
+
+        // Format dates
+        document.getElementById('ovLastEdited').textContent = stats.last_edited ? `✎ Last edited ${formatDateNice(stats.last_edited)}` : '';
+document.getElementById('ovCreated').textContent    = stats.created_at  ? `✦ Created ${formatDateNice(stats.created_at)}` : '';
+
+        // Hide creative-only buttons if not creative genre
+        const isCreative = stats.is_creative;
+        document.getElementById('ovCharBtn').style.display = isCreative ? 'block' : 'none';
+        document.getElementById('ovSceneBtn').style.display = isCreative ? 'block' : 'none';
+        document.getElementById('ovLoreBtn').style.display = isCreative ? 'block' : 'none';
+
+        // Hide creative stats if not creative
+        document.getElementById('ovCharStat').style.display = isCreative ? 'flex' : 'none';
+        document.getElementById('ovSceneStat').style.display = isCreative ? 'flex' : 'none';
+        document.getElementById('ovLoreStat').style.display = isCreative ? 'flex' : 'none';
+
+        document.getElementById('projectOverview').style.display = 'flex';
+        welcomeScreen.classList.add('hidden');
+        document.getElementById('editorHeader').style.display = 'none';
+
+    } catch (e) { console.error('showProjectOverview:', e); }
+    document.getElementById('backToOverview').style.display = 'block';
+}
+
+function hideOverview() {
+    document.getElementById('projectOverview').style.display = 'none';
+}
+function overviewGoTo(tab) {
+    if (tab === 'chapters') {
+        // Start writing = hide overview, open first chapter or show chapters tab
+        hideOverview();
+        switchTab('chapters');
+        const firstDoc = document.querySelector('#documentsList .item-list-entry');
+        if (firstDoc) firstDoc.click();
+    } else {
+        // For characters/scenes/lore — switch sidebar tab but keep overview visible
+        // so the user sees both the overview AND the sidebar list
+        switchTab(tab);
+        // Scroll sidebar into view
+        document.getElementById(`tab-${tab}`).scrollIntoView({ behavior: 'smooth' });
+    }
+}
+function formatDateNice(dateInput) {
+    // Parse as UTC if string (backend sends UTC without Z suffix)
+    let date;
+    if (typeof dateInput === 'string') {
+        // Add Z to tell JS it's UTC, then JS converts to local time automatically
+        date = new Date(dateInput.endsWith('Z') ? dateInput : dateInput + 'Z');
+    } else {
+        date = dateInput;
+    }
+
+    const now = new Date();
+    const diff = Math.floor((now - date) / 1000);
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+    return date.toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+
+// =============================================
 // TABS
 // =============================================
 function switchTab(tabName) {
@@ -326,8 +413,11 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 document.getElementById('backToProjects').addEventListener('click', () => {
     currentProjectId = null;
     currentProjectData = null;
+    hideOverview();
+    hideEditor();
     showProjectList();
     loadProjects();
+    document.getElementById('backToOverview').style.display = 'block';
 });
 
 // =============================================
@@ -345,14 +435,99 @@ function renderDocuments(docs) {
         documentsList.innerHTML = '<li class="empty-state">No chapters yet.</li>';
         return;
     }
-    documentsList.innerHTML = docs.map(d => `
+    documentsList.innerHTML = docs.map((d, i) => `
         <li class="item-list-entry ${d.id === currentDocId ? 'active' : ''}"
-            onclick="openDocument(${d.id})">
-            <span class="item-dot"></span>
+            draggable="true"
+            data-id="${d.id}"
+            data-index="${i}"
+            onclick="openDocument(${d.id})"
+            ondragstart="onDragStart(event)"
+            ondragover="onDragOver(event)"
+            ondragend="onDragEnd(event)"
+            ondrop="onDrop(event)">
+            <span class="drag-handle" title="Drag to reorder">⠿</span>
             <span class="item-name">${escapeHtml(d.title)}</span>
             <button class="item-delete" onclick="deleteDocument(event,${d.id})">×</button>
         </li>
     `).join('');
+}
+
+// =============================================
+// DRAG AND DROP — CHAPTER REORDERING
+// =============================================
+let dragSrcIndex = null;
+let dragSrcEl = null;
+
+function onDragStart(e) {
+    dragSrcEl = e.currentTarget;
+    dragSrcIndex = parseInt(dragSrcEl.dataset.index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', dragSrcEl.dataset.id);
+    setTimeout(() => dragSrcEl.classList.add('dragging'), 0);
+}
+
+function onDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const target = e.currentTarget;
+    if (target === dragSrcEl) return;
+
+    // Visual indicator
+    document.querySelectorAll('#documentsList .item-list-entry').forEach(el => {
+        el.classList.remove('drag-over-top', 'drag-over-bottom');
+    });
+
+    const rect = target.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    const isAbove = e.clientY < midY;
+    target.classList.add(isAbove ? 'drag-over-top' : 'drag-over-bottom');
+}
+
+function onDrop(e) {
+    e.preventDefault();
+    const target = e.currentTarget;
+    if (target === dragSrcEl) return;
+
+    // Build new order
+    const items = [...document.querySelectorAll('#documentsList .item-list-entry')];
+    const srcIdx = items.indexOf(dragSrcEl);
+    const tgtIdx = items.indexOf(target);
+
+    // Reorder array
+    const reordered = [...items];
+    reordered.splice(srcIdx, 1);
+
+    const rect = target.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    const insertBefore = e.clientY < midY;
+    const insertAt = insertBefore ? tgtIdx : tgtIdx + 1;
+    reordered.splice(insertAt > srcIdx ? insertAt - 1 : insertAt, 0, dragSrcEl);
+
+    // Get new ID order
+    const newOrder = reordered.map(el => parseInt(el.dataset.id));
+
+    // Save to backend
+    saveChapterOrder(newOrder);
+
+    // Clean up
+    document.querySelectorAll('#documentsList .item-list-entry').forEach(el => {
+        el.classList.remove('drag-over-top', 'drag-over-bottom', 'dragging');
+    });
+}
+
+function onDragEnd(e) {
+    document.querySelectorAll('#documentsList .item-list-entry').forEach(el => {
+        el.classList.remove('drag-over-top', 'drag-over-bottom', 'dragging');
+    });
+}
+
+async function saveChapterOrder(newOrder) {
+    try {
+        await api('POST', `/api/projects/${currentProjectId}/documents/reorder`, {
+            order: newOrder
+        });
+        await loadDocuments(currentProjectId);
+    } catch (e) { console.error('saveChapterOrder:', e); }
 }
 
 async function createDocument() {
@@ -537,7 +712,7 @@ async function openEditCharModal(id) {
         document.getElementById('charImageInput').value = c.image_url || '';
         // Show image preview if exists
         if (c.image_url) {
-            document.getElementById('charImgPreviewEl').src         = c.image_url;
+            document.getElementById('charImgPreviewEl').src = c.image_url;
             document.getElementById('charImgPreview').style.display = 'block';
         } else {
             document.getElementById('charImgPreview').style.display = 'none';
@@ -717,7 +892,7 @@ async function openEditLoreModal(id) {
         document.getElementById('loreDescInput').value = item.description || '';
         document.getElementById('loreImageInput').value = item.image_url || '';
         if (item.image_url) {
-            document.getElementById('loreImgPreviewEl').src         = item.image_url;
+            document.getElementById('loreImgPreviewEl').src = item.image_url;
             document.getElementById('loreImgPreview').style.display = 'block';
         } else {
             document.getElementById('loreImgPreview').style.display = 'none';
@@ -1095,6 +1270,7 @@ function showEditor() {
     welcomeScreen.classList.add('hidden');
     editorWrapper.classList.add('visible');
     document.getElementById('editorHeader').style.display = 'flex';
+    document.getElementById('projectOverview').style.display = 'none';
 }
 
 function hideEditor() {
@@ -1102,6 +1278,7 @@ function hideEditor() {
     welcomeScreen.classList.remove('hidden');
     editorWrapper.classList.remove('visible');
     document.getElementById('editorHeader').style.display = 'none';
+    document.getElementById('projectOverview').style.display = 'none';
     docTitleInput.value = '';
     docTitleInput.disabled = true;
     if (quill) quill.root.innerHTML = '';
@@ -1318,4 +1495,8 @@ document.addEventListener('DOMContentLoaded', () => {
             initQuill();
             loadProjects();
         });
+    document.getElementById('backToOverview').addEventListener('click', () => {
+        hideEditor();
+        showProjectOverview(currentProjectId);
+    });
 });
