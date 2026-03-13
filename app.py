@@ -434,8 +434,29 @@ def create_project():
 @app.route('/api/projects/<int:project_id>', methods=['DELETE'])
 def delete_project(project_id):
     project = Project.query.get_or_404(project_id)
+    drive_folder_id = project.drive_folder_id
+
     db.session.delete(project)
     db.session.commit()
+
+    # Delete entire project folder from Drive in background
+    user = get_current_user()
+    if user and user.access_token and drive_folder_id:
+        def delete_drive_folder_bg(app, folder_id, user_id):
+            with app.app_context():
+                u = User.query.get(user_id)
+                if not u: return
+                try:
+                    drive = get_drive_service(u)
+                    drive.files().delete(fileId=folder_id).execute()
+                    print(f"✅ Deleted Drive folder: {folder_id}")
+                except Exception as e:
+                    print(f"Drive folder delete error: {e}")
+
+        t = threading.Thread(target=delete_drive_folder_bg, args=(app, drive_folder_id, user.id))
+        t.daemon = True
+        t.start()
+
     return jsonify({'message': 'Deleted'})
 
 
@@ -517,8 +538,29 @@ def update_document(doc_id):
 @app.route('/api/documents/<int:doc_id>', methods=['DELETE'])
 def delete_document(doc_id):
     doc = Document.query.get_or_404(doc_id)
+    drive_file_id = doc.drive_file_id
+
     db.session.delete(doc)
     db.session.commit()
+
+    # Delete from Drive in background
+    user = get_current_user()
+    if user and user.access_token and drive_file_id:
+        def delete_drive_file_bg(app, file_id, user_id):
+            with app.app_context():
+                u = User.query.get(user_id)
+                if not u: return
+                try:
+                    drive = get_drive_service(u)
+                    drive.files().delete(fileId=file_id).execute()
+                    print(f"✅ Deleted Drive file: {file_id}")
+                except Exception as e:
+                    print(f"Drive delete error: {e}")
+
+        t = threading.Thread(target=delete_drive_file_bg, args=(app, drive_file_id, user.id))
+        t.daemon = True
+        t.start()
+
     return jsonify({'message': 'Deleted'})
 
 # =============================================
@@ -550,6 +592,39 @@ def create_character(project_id):
     )
     db.session.add(char)
     db.session.commit()
+
+    # Sync character info to Drive as a .txt file
+    user = get_current_user()
+    if user and user.access_token:
+        def sync_char_bg(app, char_id, project_id, user_id):
+            with app.app_context():
+                u = User.query.get(user_id)
+                p = Project.query.get(project_id)
+                c = Character.query.get(char_id)
+                if not u or not p or not c: return
+                try:
+                    drive = get_drive_service(u)
+                    # Ensure root folder exists
+                    if not u.scripvia_folder_id:
+                        u.scripvia_folder_id = get_or_create_folder(drive, 'Scripvia')
+                        db.session.commit()
+                    # Ensure project folder exists
+                    if not p.drive_folder_id:
+                        p.drive_folder_id = get_or_create_folder(drive, p.title, parent_id=u.scripvia_folder_id)
+                        db.session.commit()
+                    # Ensure Characters subfolder exists
+                    chars_folder = get_or_create_folder(drive, 'Characters', parent_id=p.drive_folder_id)
+                    # Create character file
+                    content = f"Name: {c.name}\nRole: {c.role}\nAge: {c.age}\n\nAppearance:\n{c.appearance}\n\nPersonality:\n{c.personality}\n\nBackstory:\n{c.backstory}\n\nNotes:\n{c.extra_notes}"
+                    file_id = create_drive_file(drive, c.name, content, chars_folder)
+                    print(f"✅ Character synced to Drive: {c.name}")
+                except Exception as e:
+                    print(f"Character Drive sync error: {e}")
+
+        t = threading.Thread(target=sync_char_bg, args=(app, char.id, project.id, user.id))
+        t.daemon = True
+        t.start()
+
     return jsonify(char.to_dict()), 201
 
 @app.route('/api/characters/<int:char_id>', methods=['GET'])
@@ -599,6 +674,34 @@ def create_scene(project_id):
     )
     db.session.add(scene)
     db.session.commit()
+
+    user = get_current_user()
+    if user and user.access_token:
+        def sync_scene_bg(app, scene_id, project_id, user_id):
+            with app.app_context():
+                u = User.query.get(user_id)
+                p = Project.query.get(project_id)
+                s = Scene.query.get(scene_id)
+                if not u or not p or not s: return
+                try:
+                    drive = get_drive_service(u)
+                    if not u.scripvia_folder_id:
+                        u.scripvia_folder_id = get_or_create_folder(drive, 'Scripvia')
+                        db.session.commit()
+                    if not p.drive_folder_id:
+                        p.drive_folder_id = get_or_create_folder(drive, p.title, parent_id=u.scripvia_folder_id)
+                        db.session.commit()
+                    scenes_folder = get_or_create_folder(drive, 'Scenes', parent_id=p.drive_folder_id)
+                    content = f"Scene: {s.title}\nMood: {s.mood}\nConnected Chapter: {s.connected_chapter}\n\n{html_to_plain_text(s.content)}"
+                    create_drive_file(drive, s.title, content, scenes_folder)
+                    print(f"✅ Scene synced to Drive: {s.title}")
+                except Exception as e:
+                    print(f"Scene Drive sync error: {e}")
+
+        t = threading.Thread(target=sync_scene_bg, args=(app, scene.id, project.id, user.id))
+        t.daemon = True
+        t.start()
+
     return jsonify(scene.to_dict()), 201
 
 @app.route('/api/scenes/<int:scene_id>', methods=['GET'])
@@ -650,6 +753,34 @@ def create_lore(project_id):
     )
     db.session.add(item)
     db.session.commit()
+
+    user = get_current_user()
+    if user and user.access_token:
+        def sync_lore_bg(app, item_id, project_id, user_id):
+            with app.app_context():
+                u = User.query.get(user_id)
+                p = Project.query.get(project_id)
+                l = LoreItem.query.get(item_id)
+                if not u or not p or not l: return
+                try:
+                    drive = get_drive_service(u)
+                    if not u.scripvia_folder_id:
+                        u.scripvia_folder_id = get_or_create_folder(drive, 'Scripvia')
+                        db.session.commit()
+                    if not p.drive_folder_id:
+                        p.drive_folder_id = get_or_create_folder(drive, p.title, parent_id=u.scripvia_folder_id)
+                        db.session.commit()
+                    lore_folder = get_or_create_folder(drive, 'Lore', parent_id=p.drive_folder_id)
+                    content = f"Name: {l.name}\nCategory: {l.category}\n\nDescription:\n{l.description}\n\nNotes:\n{l.extra_notes}"
+                    create_drive_file(drive, l.name, content, lore_folder)
+                    print(f"✅ Lore synced to Drive: {l.name}")
+                except Exception as e:
+                    print(f"Lore Drive sync error: {e}")
+
+        t = threading.Thread(target=sync_lore_bg, args=(app, item.id, project.id, user.id))
+        t.daemon = True
+        t.start()
+
     return jsonify(item.to_dict()), 201
 
 @app.route('/api/lore/<int:item_id>', methods=['GET'])
@@ -689,13 +820,15 @@ def get_wiki_data(project_id):
     wiki = {}
     for c in chars:
         wiki[c.name.lower()] = {
-            'type':      'character',
-            'name':      c.name,
-            'role':      c.role,
-            'age':       c.age,
-            'image_url': c.image_url,
-            'summary':   c.personality[:150] + '...' if len(c.personality) > 150 else c.personality,
-            'id':        c.id
+            'type':       'character',
+            'name':       c.name,
+            'role':       c.role,
+            'age':        c.age,
+            'image_url':  c.image_url,
+            'summary':    c.personality[:200] + '...' if len(c.personality) > 200 else c.personality,
+            'backstory':  c.backstory[:200] + '...' if len(c.backstory) > 200 else c.backstory,
+            'appearance': c.appearance[:150] + '...' if len(c.appearance) > 150 else c.appearance,
+            'id':         c.id
         }
     for l in lore:
         wiki[l.name.lower()] = {

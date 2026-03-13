@@ -3,54 +3,137 @@
 // =============================================
 
 // --- STATE ---
-let currentProjectId   = null;
+let currentProjectId = null;
 let currentProjectData = null;  // Full project object including genre
-let currentDocId       = null;
-let currentDocType     = 'chapter'; // 'chapter' | 'scene'
-let quill              = null;
-let autoSaveTimer      = null;
-let countdownTimer     = null;
-let secondsUntilSave   = 30;
-let pendingSync        = false;
-let openTabs           = [];    // [{id, title, type}] — VS Code style tabs
-let wikiData           = {};    // {name: {type, summary, image_url...}}
+let currentDocId = null;
+let currentDocType = 'chapter'; // 'chapter' | 'scene'
+let quill = null;
+let autoSaveTimer = null;
+let countdownTimer = null;
+let secondsUntilSave = 30;
+let pendingSync = false;
+let openTabs = [];    // [{id, title, type}] — VS Code style tabs
+let wikiData = {};    // {name: {type, summary, image_url...}}
 
 // --- DOM REFS ---
-const projectsList      = document.getElementById('projectsList');
-const documentsList     = document.getElementById('documentsList');
-const charactersList    = document.getElementById('charactersList');
-const scenesList        = document.getElementById('scenesList');
-const loreList          = document.getElementById('loreList');
-const projectDetail     = document.getElementById('projectDetail');
-const projectsSection   = document.getElementById('projectsSection');
+const projectsList = document.getElementById('projectsList');
+const documentsList = document.getElementById('documentsList');
+const charactersList = document.getElementById('charactersList');
+const scenesList = document.getElementById('scenesList');
+const loreList = document.getElementById('loreList');
+const projectDetail = document.getElementById('projectDetail');
+const projectsSection = document.getElementById('projectsSection');
 const currentProjectName = document.getElementById('currentProjectName');
-const welcomeScreen     = document.getElementById('welcomeScreen');
-const editorWrapper     = document.getElementById('editorWrapper');
-const docTitleInput     = document.getElementById('docTitleInput');
-const saveStatus        = document.getElementById('saveStatus');
-const saveBtn           = document.getElementById('saveBtn');
-const exportPdfBtn      = document.getElementById('exportPdfBtn');
-const exportDocxBtn     = document.getElementById('exportDocxBtn');
-const wordCountEl       = document.getElementById('wordCount');
-const charCountEl       = document.getElementById('charCount');
-const readTimeEl        = document.getElementById('readTime');
-const lastSavedTimeEl   = document.getElementById('lastSavedTime');
-const tabsBar           = document.getElementById('tabsBar');
-const openTabsEl        = document.getElementById('openTabs');
-const wikiTooltip       = document.getElementById('wikiTooltip');
+const welcomeScreen = document.getElementById('welcomeScreen');
+const editorWrapper = document.getElementById('editorWrapper');
+const docTitleInput = document.getElementById('docTitleInput');
+const saveStatus = document.getElementById('saveStatus');
+const saveBtn = document.getElementById('saveBtn');
+const exportPdfBtn = document.getElementById('exportPdfBtn');
+const exportDocxBtn = document.getElementById('exportDocxBtn');
+const wordCountEl = document.getElementById('wordCount');
+const charCountEl = document.getElementById('charCount');
+const readTimeEl = document.getElementById('readTime');
+const lastSavedTimeEl = document.getElementById('lastSavedTime');
+const tabsBar = document.getElementById('tabsBar');
+const openTabsEl = document.getElementById('openTabs');
+const wikiTooltip = document.getElementById('wikiTooltip');
 
-const newProjectModal    = document.getElementById('newProjectModal');
-const newDocModal        = document.getElementById('newDocModal');
-const newCharModal       = document.getElementById('newCharModal');
-const newSceneModal      = document.getElementById('newSceneModal');
-const newLoreModal       = document.getElementById('newLoreModal');
-const projectTitleInput  = document.getElementById('projectTitleInput');
-const projectDescInput   = document.getElementById('projectDescInput');
-const projectGenreInput  = document.getElementById('projectGenreInput');
+const newProjectModal = document.getElementById('newProjectModal');
+const newDocModal = document.getElementById('newDocModal');
+const newCharModal = document.getElementById('newCharModal');
+const newSceneModal = document.getElementById('newSceneModal');
+const newLoreModal = document.getElementById('newLoreModal');
+const projectTitleInput = document.getElementById('projectTitleInput');
+const projectDescInput = document.getElementById('projectDescInput');
+const projectGenreInput = document.getElementById('projectGenreInput');
 const docTitleModalInput = document.getElementById('docTitleModalInput');
 
 const CREATIVE_GENRES = ['fantasy', 'sci-fi', 'fiction', 'romance', 'mystery', 'thriller', 'horror', 'historical'];
 
+// =============================================
+// LOCAL IMAGE UPLOAD HELPERS
+// =============================================
+function setupImageUpload(fileInputId, urlInputId, previewWrapId, previewImgId, clearBtnId) {
+    const fileInput = document.getElementById(fileInputId);
+    const urlInput = document.getElementById(urlInputId);
+    const previewWrap = document.getElementById(previewWrapId);
+    const previewImg = document.getElementById(previewImgId);
+    const clearBtn = document.getElementById(clearBtnId);
+
+    // File selected → convert to base64
+    fileInput.addEventListener('change', () => {
+        const file = fileInput.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const base64 = e.target.result;
+            urlInput.value = base64;
+            previewImg.src = base64;
+            previewWrap.style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+    });
+
+    // URL typed → show preview
+    urlInput.addEventListener('input', () => {
+        const val = urlInput.value.trim();
+        if (val && (val.startsWith('http') || val.startsWith('data:'))) {
+            previewImg.src = val;
+            previewWrap.style.display = 'block';
+            previewImg.onerror = () => { previewWrap.style.display = 'none'; };
+        } else {
+            previewWrap.style.display = 'none';
+        }
+    });
+
+    // Clear button
+    clearBtn.addEventListener('click', () => {
+        urlInput.value = '';
+        fileInput.value = '';
+        previewImg.src = '';
+        previewWrap.style.display = 'none';
+    });
+}
+
+// =============================================
+// CUSTOM CONFIRM DIALOG
+// =============================================
+function showConfirm(message, onConfirm, title = 'Are you sure?') {
+    // Remove any existing confirm dialog
+    const existing = document.getElementById('customConfirm');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'confirm-overlay';
+    overlay.id = 'customConfirm';
+    overlay.innerHTML = `
+        <div class="confirm-box">
+            <div class="confirm-title">${title}</div>
+            <div class="confirm-msg">${message}</div>
+            <div class="confirm-actions">
+                <button class="btn-confirm-cancel" id="confirmCancelBtn">Cancel</button>
+                <button class="btn-confirm-delete" id="confirmOkBtn">Delete</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    document.getElementById('confirmOkBtn').addEventListener('click', () => {
+        overlay.remove();
+        onConfirm();
+    });
+
+    document.getElementById('confirmCancelBtn').addEventListener('click', () => {
+        overlay.remove();
+    });
+
+    overlay.addEventListener('click', e => {
+        if (e.target === overlay) overlay.remove();
+    });
+}
 // =============================================
 // QUILL INIT
 // =============================================
@@ -81,8 +164,24 @@ function initQuill() {
     });
 
     // Wiki tooltip on hover over editor text
-    quill.root.addEventListener('mouseover', handleWikiHover);
-    quill.root.addEventListener('mouseout',  () => hideWikiTooltip());
+    let wikiHoverTimer = null;
+
+    quill.root.addEventListener('mousemove', (e) => {
+        clearTimeout(wikiHoverTimer);
+        wikiHoverTimer = setTimeout(() => handleWikiHover(e), 400);
+    });
+
+    quill.root.addEventListener('mouseleave', () => {
+        clearTimeout(wikiHoverTimer);
+        // Delay hide so user can move mouse onto the card itself
+        setTimeout(() => {
+            if (!wikiTooltip.matches(':hover')) hideWikiTooltip();
+        }, 200);
+    });
+
+    wikiTooltip.addEventListener('mouseleave', () => {
+        hideWikiTooltip();
+    });
 }
 
 // =============================================
@@ -103,7 +202,7 @@ async function loadProjects() {
     try {
         const projects = await api('GET', '/api/projects');
         renderProjects(projects);
-    } catch(e) { console.error('loadProjects:', e); }
+    } catch (e) { console.error('loadProjects:', e); }
 }
 
 function renderProjects(projects) {
@@ -122,7 +221,7 @@ function renderProjects(projects) {
 }
 
 function genreEmoji(genre) {
-    const map = { fantasy:'⚔️', 'sci-fi':'🚀', fiction:'📖', romance:'💕', mystery:'🔍', thriller:'⚡', horror:'🕯️', historical:'🏛️', journal:'📓', screenplay:'🎬', poetry:'✨', general:'📝', other:'📌' };
+    const map = { fantasy: '⚔️', 'sci-fi': '🚀', fiction: '📖', romance: '💕', mystery: '🔍', thriller: '⚡', horror: '🕯️', historical: '🏛️', journal: '📓', screenplay: '🎬', poetry: '✨', general: '📝', other: '📌' };
     return map[genre] || '📝';
 }
 
@@ -139,11 +238,11 @@ async function createProject() {
         });
         closeModal(newProjectModal);
         projectTitleInput.value = '';
-        projectDescInput.value  = '';
+        projectDescInput.value = '';
         projectGenreInput.value = 'general';
         await loadProjects();
         selectProject(p.id);
-    } catch(e) {
+    } catch (e) {
         console.error('createProject:', e);
     } finally {
         confirmBtn.textContent = 'Create Project';
@@ -153,17 +252,22 @@ async function createProject() {
 
 async function deleteProject(event, id) {
     event.stopPropagation();
-    if (!confirm('Delete this project and everything in it?')) return;
-    try {
-        await api('DELETE', `/api/projects/${id}`);
-        if (currentProjectId === id) {
-            currentProjectId = null;
-            currentProjectData = null;
-            showProjectList();
-            hideEditor();
-        }
-        await loadProjects();
-    } catch(e) { console.error('deleteProject:', e); }
+    showConfirm(
+        'This will permanently delete the project and all its chapters, characters, scenes and lore.',
+        async () => {
+            try {
+                await api('DELETE', `/api/projects/${id}`);
+                if (currentProjectId === id) {
+                    currentProjectId = null;
+                    currentProjectData = null;
+                    showProjectList();
+                    hideEditor();
+                }
+                await loadProjects();
+            } catch (e) { console.error('deleteProject:', e); }
+        },
+        'Delete Project?'
+    );
 }
 
 async function selectProject(id) {
@@ -171,7 +275,7 @@ async function selectProject(id) {
         currentProjectId = id;  // Set this FIRST before any async calls
         const projects = await api('GET', '/api/projects');
         currentProjectData = projects.find(p => p.id === id);
-        
+
         // Show project detail view
         showProjectDetail();
         currentProjectName.textContent = currentProjectData.title;
@@ -188,17 +292,17 @@ async function selectProject(id) {
         if (isCreative) {
             await loadWikiData(id);
         }
-    } catch(e) { console.error('selectProject:', e); }
+    } catch (e) { console.error('selectProject:', e); }
 }
 
 function showProjectList() {
     projectsSection.style.display = 'block';
-    projectDetail.style.display   = 'none';
+    projectDetail.style.display = 'none';
 }
 
 function showProjectDetail() {
     projectsSection.style.display = 'none';
-    projectDetail.style.display   = 'flex';
+    projectDetail.style.display = 'flex';
 }
 
 // =============================================
@@ -209,10 +313,10 @@ function switchTab(tabName) {
     document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.id === `tab-${tabName}`));
 
     // Load data for tab
-    if (tabName === 'chapters')    loadDocuments(currentProjectId);
-    if (tabName === 'characters')  loadCharacters(currentProjectId);
-    if (tabName === 'scenes')      loadScenes(currentProjectId);
-    if (tabName === 'lore')        loadLore(currentProjectId);
+    if (tabName === 'chapters') loadDocuments(currentProjectId);
+    if (tabName === 'characters') loadCharacters(currentProjectId);
+    if (tabName === 'scenes') loadScenes(currentProjectId);
+    if (tabName === 'lore') loadLore(currentProjectId);
 }
 
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -220,7 +324,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 });
 
 document.getElementById('backToProjects').addEventListener('click', () => {
-    currentProjectId   = null;
+    currentProjectId = null;
     currentProjectData = null;
     showProjectList();
     loadProjects();
@@ -233,7 +337,7 @@ async function loadDocuments(projectId) {
     try {
         const docs = await api('GET', `/api/projects/${projectId}/documents`);
         renderDocuments(docs);
-    } catch(e) { console.error('loadDocuments:', e); }
+    } catch (e) { console.error('loadDocuments:', e); }
 }
 
 function renderDocuments(docs) {
@@ -263,7 +367,7 @@ async function createDocument() {
         docTitleModalInput.value = '';
         if (currentProjectId) await loadDocuments(currentProjectId);
         openDocument(doc.id);
-    } catch(e) {
+    } catch (e) {
         console.error('createDocument:', e);
     } finally {
         confirmBtn.textContent = 'Create';
@@ -275,12 +379,12 @@ async function openDocument(id, type = 'chapter') {
     try {
         const endpoint = type === 'scene' ? `/api/scenes/${id}` : `/api/documents/${id}`;
         const doc = await api('GET', endpoint);
-        currentDocId   = id;
+        currentDocId = id;
         currentDocType = type;
 
-        docTitleInput.value    = doc.title;
+        docTitleInput.value = doc.title;
         docTitleInput.disabled = false;
-        quill.root.innerHTML   = doc.content || '';
+        quill.root.innerHTML = doc.content || '';
         quill.history.clear();
 
         showEditor();
@@ -293,9 +397,9 @@ async function openDocument(id, type = 'chapter') {
         startAutoSave();
         addOpenTab(id, doc.title, type);
 
-       if (type === 'chapter' && currentProjectId) await loadDocuments(currentProjectId);
-       if (type === 'scene'   && currentProjectId) await loadScenes(currentProjectId);
-    } catch(e) { console.error('openDocument:', e); }
+        if (type === 'chapter' && currentProjectId) await loadDocuments(currentProjectId);
+        if (type === 'scene' && currentProjectId) await loadScenes(currentProjectId);
+    } catch (e) { console.error('openDocument:', e); }
 }
 
 async function saveDocument() {
@@ -308,7 +412,7 @@ async function saveDocument() {
             : `/api/documents/${currentDocId}`;
 
         await api('PUT', endpoint, {
-            title:   docTitleInput.value.trim() || 'Untitled',
+            title: docTitleInput.value.trim() || 'Untitled',
             content: quill.root.innerHTML
         });
 
@@ -319,7 +423,7 @@ async function saveDocument() {
         updateLastSaved();
 
         if (currentDocType === 'chapter') await loadDocuments(currentProjectId);
-        if (currentDocType === 'scene')   await loadScenes(currentProjectId);
+        if (currentDocType === 'scene') await loadScenes(currentProjectId);
 
         // Sync to Drive if online and it's a chapter
         if (navigator.onLine && currentDocType === 'chapter') {
@@ -328,7 +432,7 @@ async function saveDocument() {
                 await api('POST', `/api/documents/${currentDocId}/sync`);
                 setSaveStatus('synced');
                 setTimeout(() => setSaveStatus('saved'), 2000);
-            } catch(e) {
+            } catch (e) {
                 setSaveStatus('saved');
             }
         } else {
@@ -336,7 +440,7 @@ async function saveDocument() {
             if (!navigator.onLine) pendingSync = true;
         }
 
-    } catch(e) {
+    } catch (e) {
         setSaveStatus('error');
         console.error('saveDocument:', e);
     }
@@ -344,13 +448,18 @@ async function saveDocument() {
 
 async function deleteDocument(event, id) {
     event.stopPropagation();
-    if (!confirm('Delete this chapter?')) return;
-    try {
-        await api('DELETE', `/api/documents/${id}`);
-        if (currentDocId === id) { currentDocId = null; hideEditor(); enableHeaderBtns(false); }
-        removeOpenTab(id);
-        await loadDocuments(currentProjectId);
-    } catch(e) { console.error('deleteDocument:', e); }
+    showConfirm(
+        'This chapter will be permanently deleted.',
+        async () => {
+            try {
+                await api('DELETE', `/api/documents/${id}`);
+                if (currentDocId === id) { currentDocId = null; hideEditor(); enableHeaderBtns(false); }
+                removeOpenTab(id);
+                await loadDocuments(currentProjectId);
+            } catch (e) { console.error('deleteDocument:', e); }
+        },
+        'Delete Chapter?'
+    );
 }
 
 // =============================================
@@ -360,7 +469,7 @@ async function loadCharacters(projectId) {
     try {
         const chars = await api('GET', `/api/projects/${projectId}/characters`);
         renderCharacters(chars);
-    } catch(e) { console.error('loadCharacters:', e); }
+    } catch (e) { console.error('loadCharacters:', e); }
 }
 
 function renderCharacters(chars) {
@@ -369,19 +478,12 @@ function renderCharacters(chars) {
         return;
     }
     charactersList.innerHTML = chars.map(c => `
-        <li class="item-list-entry char-preview">
+        <li class="item-list-entry char-preview" onclick="openEditCharModal(${c.id})">
             <span class="item-name">${escapeHtml(c.name)}</span>
             ${c.role ? `<span class="item-badge">${escapeHtml(c.role)}</span>` : ''}
             <button class="item-delete" onclick="deleteCharacter(event,${c.id})">×</button>
 
-            <!-- Hover card -->
-            <div class="char-preview-card">
-                ${c.image_url ? `<img class="char-card-img" src="${escapeHtml(c.image_url)}" alt="${escapeHtml(c.name)}" onerror="this.style.display='none'">` : ''}
-                <div class="char-card-name">${escapeHtml(c.name)}</div>
-                ${c.role ? `<div class="char-card-role">${escapeHtml(c.role)}${c.age ? ' · ' + escapeHtml(c.age) : ''}</div>` : ''}
-                ${c.personality ? `<div class="char-card-summary">${escapeHtml(c.personality.slice(0, 120))}${c.personality.length > 120 ? '...' : ''}</div>` : ''}
-                ${c.backstory ? `<div class="char-card-summary" style="margin-top:6px;font-style:italic;">${escapeHtml(c.backstory.slice(0, 100))}${c.backstory.length > 100 ? '...' : ''}</div>` : ''}
-            </div>
+            
         </li>
     `).join('');
 }
@@ -392,32 +494,105 @@ async function createCharacter() {
     try {
         await api('POST', `/api/projects/${currentProjectId}/characters`, {
             name,
-            role:        document.getElementById('charRoleInput').value,
-            age:         document.getElementById('charAgeInput').value.trim(),
-            appearance:  document.getElementById('charAppearanceInput').value.trim(),
+            role: document.getElementById('charRoleInput').value,
+            age: document.getElementById('charAgeInput').value.trim(),
+            appearance: document.getElementById('charAppearanceInput').value.trim(),
             personality: document.getElementById('charPersonalityInput').value.trim(),
-            backstory:   document.getElementById('charBackstoryInput').value.trim(),
-            image_url:   document.getElementById('charImageInput').value.trim()
+            backstory: document.getElementById('charBackstoryInput').value.trim(),
+            image_url: document.getElementById('charImageInput').value.trim()
         });
         closeModal(newCharModal);
         // Clear fields
-        ['charNameInput','charAgeInput','charAppearanceInput','charPersonalityInput','charBackstoryInput','charImageInput'].forEach(id => document.getElementById(id).value = '');
+        ['charNameInput', 'charAgeInput', 'charAppearanceInput', 'charPersonalityInput', 'charBackstoryInput', 'charImageInput'].forEach(id => document.getElementById(id).value = '');
         document.getElementById('charRoleInput').value = '';
         await loadCharacters(currentProjectId);
         await loadWikiData(currentProjectId);
-    } catch(e) { console.error('createCharacter:', e); }
+    } catch (e) { console.error('createCharacter:', e); }
 }
 
 async function deleteCharacter(event, id) {
     event.stopPropagation();
-    if (!confirm('Delete this character?')) return;
+    showConfirm(
+        'This character and all their info will be permanently deleted.',
+        async () => {
+            try {
+                await api('DELETE', `/api/characters/${id}`);
+                await loadCharacters(currentProjectId);
+                await loadWikiData(currentProjectId);
+            } catch (e) { console.error('deleteCharacter:', e); }
+        },
+        'Delete Character?'
+    );
+}
+async function openEditCharModal(id) {
     try {
-        await api('DELETE', `/api/characters/${id}`);
-        await loadCharacters(currentProjectId);
-        await loadWikiData(currentProjectId);
-    } catch(e) { console.error('deleteCharacter:', e); }
+        const c = await api('GET', `/api/characters/${id}`);
+
+        document.getElementById('charNameInput').value = c.name || '';
+        document.getElementById('charRoleInput').value = c.role || '';
+        document.getElementById('charAgeInput').value = c.age || '';
+        document.getElementById('charAppearanceInput').value = c.appearance || '';
+        document.getElementById('charPersonalityInput').value = c.personality || '';
+        document.getElementById('charBackstoryInput').value = c.backstory || '';
+        document.getElementById('charImageInput').value = c.image_url || '';
+        // Show image preview if exists
+        if (c.image_url) {
+            document.getElementById('charImgPreviewEl').src         = c.image_url;
+            document.getElementById('charImgPreview').style.display = 'block';
+        } else {
+            document.getElementById('charImgPreview').style.display = 'none';
+        }
+        document.querySelector('#newCharModal .modal-title').textContent = 'Edit Character';
+        document.getElementById('confirmCharBtn').textContent = 'Save Changes';
+
+        // Store id on button as data attribute instead of reassigning onclick
+        document.getElementById('confirmCharBtn').dataset.editId = id;
+        document.getElementById('confirmCharBtn').dataset.mode = 'edit';
+
+        openModal(newCharModal);
+    } catch (e) { console.error('openEditCharModal:', e); }
 }
 
+async function saveEditChar(id) {
+    const name = document.getElementById('charNameInput').value.trim();
+    if (!name) { document.getElementById('charNameInput').focus(); return; }
+    const confirmBtn = document.getElementById('confirmCharBtn');
+    confirmBtn.textContent = 'Saving...';
+    confirmBtn.disabled = true;
+    try {
+        await api('PUT', `/api/characters/${id}`, {
+            name,
+            role: document.getElementById('charRoleInput').value,
+            age: document.getElementById('charAgeInput').value.trim(),
+            appearance: document.getElementById('charAppearanceInput').value.trim(),
+            personality: document.getElementById('charPersonalityInput').value.trim(),
+            backstory: document.getElementById('charBackstoryInput').value.trim(),
+            image_url: document.getElementById('charImageInput').value.trim()
+        });
+        closeModal(newCharModal);
+        resetCharModal();
+        await loadCharacters(currentProjectId);
+        await loadWikiData(currentProjectId);
+    } catch (e) {
+        console.error('saveEditChar:', e);
+    } finally {
+        confirmBtn.textContent = 'Save Changes';
+        confirmBtn.disabled = false;
+    }
+}
+
+function resetCharModal() {
+    document.querySelector('#newCharModal .modal-title').textContent = 'New Character';
+    document.getElementById('confirmCharBtn').textContent = 'Create Character';
+    delete document.getElementById('confirmCharBtn').dataset.editId;
+    delete document.getElementById('confirmCharBtn').dataset.mode;
+    ['charNameInput', 'charAgeInput', 'charAppearanceInput', 'charPersonalityInput', 'charBackstoryInput', 'charImageInput']
+        .forEach(id => document.getElementById(id).value = '');
+    document.getElementById('charRoleInput').value = '';
+    document.getElementById('charImgPreview').style.display = 'none';
+    document.getElementById('charImgPreviewEl').src = '';
+    document.getElementById('charImageFile').value = '';
+}
 // =============================================
 // SCENES
 // =============================================
@@ -425,11 +600,11 @@ async function loadScenes(projectId) {
     try {
         const scenes = await api('GET', `/api/projects/${projectId}/scenes`);
         renderScenes(scenes);
-    } catch(e) { console.error('loadScenes:', e); }
+    } catch (e) { console.error('loadScenes:', e); }
 }
 
 function renderScenes(scenes) {
-    const moodEmoji = { tense:'⚡', romantic:'💕', mysterious:'🌫️', action:'🔥', sad:'💧', hopeful:'🌅', dark:'🌑', comedic:'😄' };
+    const moodEmoji = { tense: '⚡', romantic: '💕', mysterious: '🌫️', action: '🔥', sad: '💧', hopeful: '🌅', dark: '🌑', comedic: '😄' };
     if (!scenes.length) {
         scenesList.innerHTML = '<li class="empty-state">No scenes yet.<br>Capture a scene idea!</li>';
         return;
@@ -454,21 +629,26 @@ async function createScene() {
         });
         closeModal(newSceneModal);
         document.getElementById('sceneTitleInput').value = '';
-        document.getElementById('sceneMoodInput').value  = '';
+        document.getElementById('sceneMoodInput').value = '';
         await loadScenes(currentProjectId);
         openDocument(scene.id, 'scene');
-    } catch(e) { console.error('createScene:', e); }
+    } catch (e) { console.error('createScene:', e); }
 }
 
 async function deleteScene(event, id) {
     event.stopPropagation();
-    if (!confirm('Delete this scene?')) return;
-    try {
-        await api('DELETE', `/api/scenes/${id}`);
-        if (currentDocId === id) { currentDocId = null; hideEditor(); enableHeaderBtns(false); }
-        removeOpenTab(id);
-        await loadScenes(currentProjectId);
-    } catch(e) { console.error('deleteScene:', e); }
+    showConfirm(
+        'This scene will be permanently deleted.',
+        async () => {
+            try {
+                await api('DELETE', `/api/scenes/${id}`);
+                if (currentDocId === id) { currentDocId = null; hideEditor(); enableHeaderBtns(false); }
+                removeOpenTab(id);
+                await loadScenes(currentProjectId);
+            } catch (e) { console.error('deleteScene:', e); }
+        },
+        'Delete Scene?'
+    );
 }
 
 // =============================================
@@ -478,17 +658,17 @@ async function loadLore(projectId) {
     try {
         const items = await api('GET', `/api/projects/${projectId}/lore`);
         renderLore(items);
-    } catch(e) { console.error('loadLore:', e); }
+    } catch (e) { console.error('loadLore:', e); }
 }
 
 function renderLore(items) {
-    const catEmoji = { item:'⚔️', place:'🗺️', organization:'🏛️', concept:'✨', creature:'🐉', event:'📅', other:'📌' };
+    const catEmoji = { item: '⚔️', place: '🗺️', organization: '🏛️', concept: '✨', creature: '🐉', event: '📅', other: '📌' };
     if (!items.length) {
         loreList.innerHTML = '<li class="empty-state">No lore entries yet.</li>';
         return;
     }
     loreList.innerHTML = items.map(i => `
-        <li class="item-list-entry">
+        <li class="item-list-entry" onclick="openEditLoreModal(${i.id})">
             <span class="item-name">${escapeHtml(i.name)}</span>
             <span class="item-badge">${catEmoji[i.category] || '📌'}</span>
             <button class="item-delete" onclick="deleteLore(event,${i.id})">×</button>
@@ -502,76 +682,230 @@ async function createLore() {
     try {
         await api('POST', `/api/projects/${currentProjectId}/lore`, {
             name,
-            category:    document.getElementById('loreCategoryInput').value,
+            category: document.getElementById('loreCategoryInput').value,
             description: document.getElementById('loreDescInput').value.trim(),
-            image_url:   document.getElementById('loreImageInput').value.trim()
+            image_url: document.getElementById('loreImageInput').value.trim()
         });
         closeModal(newLoreModal);
-        ['loreNameInput','loreDescInput','loreImageInput'].forEach(id => document.getElementById(id).value = '');
+        ['loreNameInput', 'loreDescInput', 'loreImageInput'].forEach(id => document.getElementById(id).value = '');
         document.getElementById('loreCategoryInput').value = 'item';
         await loadLore(currentProjectId);
         await loadWikiData(currentProjectId);
-    } catch(e) { console.error('createLore:', e); }
+    } catch (e) { console.error('createLore:', e); }
 }
 
 async function deleteLore(event, id) {
     event.stopPropagation();
-    if (!confirm('Delete this lore entry?')) return;
+    showConfirm(
+        'This lore entry will be permanently deleted.',
+        async () => {
+            try {
+                await api('DELETE', `/api/lore/${id}`);
+                await loadLore(currentProjectId);
+                await loadWikiData(currentProjectId);
+            } catch (e) { console.error('deleteLore:', e); }
+        },
+        'Delete Lore Entry?'
+    );
+}
+async function openEditLoreModal(id) {
     try {
-        await api('DELETE', `/api/lore/${id}`);
-        await loadLore(currentProjectId);
-        await loadWikiData(currentProjectId);
-    } catch(e) { console.error('deleteLore:', e); }
+        const item = await api('GET', `/api/lore/${id}`);
+
+        document.getElementById('loreNameInput').value = item.name || '';
+        document.getElementById('loreCategoryInput').value = item.category || 'item';
+        document.getElementById('loreDescInput').value = item.description || '';
+        document.getElementById('loreImageInput').value = item.image_url || '';
+        if (item.image_url) {
+            document.getElementById('loreImgPreviewEl').src         = item.image_url;
+            document.getElementById('loreImgPreview').style.display = 'block';
+        } else {
+            document.getElementById('loreImgPreview').style.display = 'none';
+        }
+        document.querySelector('#newLoreModal .modal-title').textContent = 'Edit Lore Entry';
+        document.getElementById('confirmLoreBtn').textContent = 'Save Changes';
+        document.getElementById('confirmLoreBtn').dataset.editId = id;
+        document.getElementById('confirmLoreBtn').dataset.mode = 'edit';
+
+        openModal(newLoreModal);
+    } catch (e) { console.error('openEditLoreModal:', e); }
 }
 
+async function saveEditLore(id) {
+    const name = document.getElementById('loreNameInput').value.trim();
+    if (!name) { document.getElementById('loreNameInput').focus(); return; }
+    const confirmBtn = document.getElementById('confirmLoreBtn');
+    confirmBtn.textContent = 'Saving...';
+    confirmBtn.disabled = true;
+    try {
+        await api('PUT', `/api/lore/${id}`, {
+            name,
+            category: document.getElementById('loreCategoryInput').value,
+            description: document.getElementById('loreDescInput').value.trim(),
+            image_url: document.getElementById('loreImageInput').value.trim()
+        });
+        closeModal(newLoreModal);
+        await loadLore(currentProjectId);
+        await loadWikiData(currentProjectId);
+    } catch (e) {
+        console.error('saveEditLore:', e);
+    } finally {
+        confirmBtn.textContent = 'Save Changes';
+        confirmBtn.disabled = false;
+        resetLoreModal();
+    }
+}
+
+function resetLoreModal() {
+    document.querySelector('#newLoreModal .modal-title').textContent = 'New Lore Entry';
+    document.getElementById('confirmLoreBtn').textContent = 'Create Entry';
+    delete document.getElementById('confirmLoreBtn').dataset.editId;
+    delete document.getElementById('confirmLoreBtn').dataset.mode;
+    ['loreNameInput', 'loreDescInput', 'loreImageInput'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('loreCategoryInput').value = 'item';
+    document.getElementById('loreImgPreview').style.display = 'none';
+    document.getElementById('loreImgPreviewEl').src = '';
+    document.getElementById('loreImageFile').value = '';
+}
 // =============================================
 // WIKI DATA + HOVER TOOLTIPS
 // =============================================
 async function loadWikiData(projectId) {
     try {
         wikiData = await api('GET', `/api/projects/${projectId}/wiki`);
-    } catch(e) { console.error('loadWikiData:', e); }
+    } catch (e) { console.error('loadWikiData:', e); }
 }
 
 function handleWikiHover(e) {
-    const target = e.target;
-    if (target.tagName !== 'SPAN' && target.tagName !== 'P' && target.tagName !== 'STRONG' && target.tagName !== 'EM') return;
+    if (!wikiData || Object.keys(wikiData).length === 0) return;
 
-    const text = target.textContent.toLowerCase().trim();
-    if (!text || text.length < 2) return;
+    // Get word at cursor position
+    let range;
+    try {
+        if (document.caretRangeFromPoint) {
+            range = document.caretRangeFromPoint(e.clientX, e.clientY);
+        } else if (document.caretPositionFromPoint) {
+            const pos = document.caretPositionFromPoint(e.clientX, e.clientY);
+            if (!pos) return;
+            range = document.createRange();
+            range.setStart(pos.offsetNode, pos.offset);
+            range.setEnd(pos.offsetNode, pos.offset);
+        }
+        if (!range) return;
+        range.expand('word');
+    } catch (e) { return; }
 
-    // Check if any wiki entry name is contained in or matches the hovered text
-    for (const [key, entry] of Object.entries(wikiData)) {
-        if (text.includes(key) || key.includes(text)) {
-            showWikiTooltip(entry, e.clientX, e.clientY);
-            return;
+    const hoveredWord = range.toString().trim().toLowerCase();
+    if (!hoveredWord || hoveredWord.length < 2) {
+        hideWikiTooltip();
+        return;
+    }
+
+    // Get full paragraph text to check multi-word names
+    const node = range.startContainer;
+    const paraText = node.textContent || '';
+
+    // Sort keys longest first so "Suyeon Park" matches before "Suyeon"
+    const sortedKeys = Object.keys(wikiData).sort((a, b) => b.length - a.length);
+
+    for (const key of sortedKeys) {
+        const keyWords = key.split(' ');
+        const firstWord = keyWords[0].toLowerCase();
+
+        // Match if hovered word is any word within the key name
+        const keyWordList = keyWords.map(w => w.toLowerCase());
+        const wordMatches = keyWordList.includes(hoveredWord);
+
+        if (wordMatches || hoveredWord === key) {
+            // Verify full name exists in paragraph with word boundaries
+            const regex = new RegExp(`\\b${escapeRegex(key)}\\b`, 'i');
+            if (regex.test(paraText)) {
+                showWikiTooltip(wikiData[key], e.clientX, e.clientY);
+                return;
+            }
         }
     }
+
+    hideWikiTooltip();
+}
+
+function escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function showWikiTooltip(entry, x, y) {
-    const tooltip  = wikiTooltip;
-    const imgEl    = document.getElementById('wikiTooltipImg');
-    const imgTag   = document.getElementById('wikiTooltipImgEl');
-    const nameEl   = document.getElementById('wikiTooltipName');
-    const typeEl   = document.getElementById('wikiTooltipType');
-    const summaryEl = document.getElementById('wikiTooltipSummary');
+    const tooltip = wikiTooltip;
+    const imgEl = document.getElementById('wikiTooltipImgEl');
+    const placeholder = document.getElementById('wikiCardPlaceholder');
+    const nameEl = document.getElementById('wikiTooltipName');
+    const typeEl = document.getElementById('wikiTooltipType');
+    const bodyEl = document.getElementById('wikiCardBody');
 
-    nameEl.textContent    = entry.name;
-    typeEl.textContent    = entry.type === 'character' ? `${entry.role || 'Character'}` : `${entry.category || 'Lore'}`;
-    summaryEl.textContent = entry.summary || '';
+    nameEl.textContent = entry.name;
 
-    if (entry.image_url) {
-        imgTag.src          = entry.image_url;
-        imgEl.style.display = 'block';
+    // Type label
+    if (entry.type === 'character') {
+        const parts = [];
+        if (entry.role) parts.push(entry.role);
+        if (entry.age) parts.push(`Age ${entry.age}`);
+        typeEl.textContent = parts.length ? parts.join(' · ') : 'Character';
     } else {
-        imgEl.style.display = 'none';
+        typeEl.textContent = entry.category ? `${entry.category}` : 'Lore';
     }
 
-    // Position tooltip near cursor
+    // Image — hide entire image section if no image
+    const imgWrap = document.getElementById('wikiCardImgWrap');
+    if (entry.image_url) {
+        imgEl.src = entry.image_url;
+        imgEl.style.display = 'block';
+        imgWrap.style.display = 'block';
+        placeholder.style.display = 'none';
+        imgEl.onerror = () => {
+            imgWrap.style.display = 'none';
+        };
+    } else {
+        imgWrap.style.display = 'none';
+    }
+
+    // Body — show all available info
+    let bodyHtml = '';
+    if (entry.type === 'character') {
+        if (entry.summary) bodyHtml += `
+            <div class="wiki-card-field">
+                <div class="wiki-card-field-label">Personality</div>
+                <div class="wiki-card-field-value">${escapeHtml(entry.summary)}</div>
+            </div>`;
+        if (entry.backstory) bodyHtml += `
+            <div class="wiki-card-field">
+                <div class="wiki-card-field-label">Backstory</div>
+                <div class="wiki-card-field-value">${escapeHtml(entry.backstory)}</div>
+            </div>`;
+        if (entry.appearance) bodyHtml += `
+            <div class="wiki-card-field">
+                <div class="wiki-card-field-label">Appearance</div>
+                <div class="wiki-card-field-value">${escapeHtml(entry.appearance)}</div>
+            </div>`;
+    } else {
+        if (entry.summary) bodyHtml += `
+            <div class="wiki-card-field">
+                <div class="wiki-card-field-value">${escapeHtml(entry.summary)}</div>
+            </div>`;
+    }
+    bodyEl.innerHTML = bodyHtml || `<div class="wiki-card-field-value" style="color:var(--text-muted);font-style:italic;">No details added yet.</div>`;
+
+    // Position — prefer showing to the right, flip left if near edge
+    const cardWidth = 340;
+    const cardHeight = 400;
+    let left = x + 20;
+    let top = y - 60;
+
+    if (left + cardWidth > window.innerWidth - 20) left = x - cardWidth - 20;
+    if (top + cardHeight > window.innerHeight - 20) top = window.innerHeight - cardHeight - 20;
+    if (top < 10) top = 10;
+
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
     tooltip.style.display = 'block';
-    tooltip.style.left    = `${Math.min(x + 16, window.innerWidth - 260)}px`;
-    tooltip.style.top     = `${Math.min(y - 10, window.innerHeight - 200)}px`;
 }
 
 function hideWikiTooltip() {
@@ -645,28 +979,28 @@ function closeTab(event, id, type) {
 // =============================================
 // AUTO-SAVE & LOCALSTORAGE
 // =============================================
-function getLocalKey(key)       { return `scripvia_doc_${key}`; }
+function getLocalKey(key) { return `scripvia_doc_${key}`; }
 
 function saveToLocalStorage() {
     if (!currentDocId || !quill) return;
     try {
         localStorage.setItem(getLocalKey(`${currentDocType}_${currentDocId}`), JSON.stringify({
-            title:   docTitleInput.value,
+            title: docTitleInput.value,
             content: quill.root.innerHTML,
             savedAt: Date.now()
         }));
-    } catch(e) {}
+    } catch (e) { }
 }
 
 function loadFromLocalStorage(key) {
     try {
         const raw = localStorage.getItem(getLocalKey(key));
         return raw ? JSON.parse(raw) : null;
-    } catch(e) { return null; }
+    } catch (e) { return null; }
 }
 
 function clearLocalStorage(key) {
-    try { localStorage.removeItem(getLocalKey(key)); } catch(e) {}
+    try { localStorage.removeItem(getLocalKey(key)); } catch (e) { }
 }
 
 function checkLocalStorageRestore(key, serverContent) {
@@ -679,7 +1013,7 @@ function checkLocalStorageRestore(key, serverContent) {
         const restore = confirm(`📋 Unsaved changes found from ${timeAgo}.\n\nRestore them?`);
         if (restore) {
             quill.root.innerHTML = backup.content || '';
-            docTitleInput.value  = backup.title || '';
+            docTitleInput.value = backup.title || '';
             setSaveStatus('unsaved');
             return true;
         } else { clearLocalStorage(key); }
@@ -689,9 +1023,9 @@ function checkLocalStorageRestore(key, serverContent) {
 
 function formatTimeAgo(ts) {
     const d = Math.floor((Date.now() - ts) / 1000);
-    if (d < 60)   return `${d}s ago`;
-    if (d < 3600) return `${Math.floor(d/60)}m ago`;
-    return `${Math.floor(d/3600)}h ago`;
+    if (d < 60) return `${d}s ago`;
+    if (d < 3600) return `${Math.floor(d / 60)}m ago`;
+    return `${Math.floor(d / 3600)}h ago`;
 }
 
 function startAutoSave() {
@@ -714,7 +1048,7 @@ function startAutoSave() {
 }
 
 function stopAutoSave() {
-    if (autoSaveTimer)  { clearInterval(autoSaveTimer);  autoSaveTimer  = null; }
+    if (autoSaveTimer) { clearInterval(autoSaveTimer); autoSaveTimer = null; }
     if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
     secondsUntilSave = 30;
 }
@@ -727,7 +1061,7 @@ function resetCountdown() { secondsUntilSave = 30; }
 window.addEventListener('online', async () => {
     if (pendingSync && currentDocId && currentDocType === 'chapter') {
         setSaveStatus('syncing');
-        try { await saveDocument(); pendingSync = false; } catch(e) {}
+        try { await saveDocument(); pendingSync = false; } catch (e) { }
     }
 });
 window.addEventListener('offline', () => { console.log('🔴 Offline'); });
@@ -737,15 +1071,15 @@ window.addEventListener('offline', () => { console.log('🔴 Offline'); });
 // =============================================
 function updateStats() {
     if (!quill) return;
-    const text      = quill.getText().trim();
-    const words     = text ? text.split(/\s+/).filter(w => w.length > 0) : [];
+    const text = quill.getText().trim();
+    const words = text ? text.split(/\s+/).filter(w => w.length > 0) : [];
     const wordCount = words.length;
     const charCount = text.length;
-    const readTime  = Math.max(1, Math.ceil(wordCount / 200));
+    const readTime = Math.max(1, Math.ceil(wordCount / 200));
 
     if (wordCountEl) wordCountEl.textContent = `${wordCount.toLocaleString()} word${wordCount !== 1 ? 's' : ''}`;
     if (charCountEl) charCountEl.textContent = `${charCount.toLocaleString()} char${charCount !== 1 ? 's' : ''}`;
-    if (readTimeEl)  readTimeEl.textContent  = `~${readTime} min read`;
+    if (readTimeEl) readTimeEl.textContent = `~${readTime} min read`;
 }
 
 function updateLastSaved() {
@@ -760,43 +1094,45 @@ function updateLastSaved() {
 function showEditor() {
     welcomeScreen.classList.add('hidden');
     editorWrapper.classList.add('visible');
+    document.getElementById('editorHeader').style.display = 'flex';
 }
 
 function hideEditor() {
     stopAutoSave();
     welcomeScreen.classList.remove('hidden');
     editorWrapper.classList.remove('visible');
-    docTitleInput.value    = '';
+    document.getElementById('editorHeader').style.display = 'none';
+    docTitleInput.value = '';
     docTitleInput.disabled = true;
     if (quill) quill.root.innerHTML = '';
     setSaveStatus('');
-    if (wordCountEl)     wordCountEl.textContent     = '0 words';
-    if (charCountEl)     charCountEl.textContent     = '0 chars';
-    if (readTimeEl)      readTimeEl.textContent      = '~0 min read';
+    if (wordCountEl) wordCountEl.textContent = '0 words';
+    if (charCountEl) charCountEl.textContent = '0 chars';
+    if (readTimeEl) readTimeEl.textContent = '~0 min read';
     if (lastSavedTimeEl) lastSavedTimeEl.textContent = 'Never saved';
 }
 
 function setSaveStatus(status) {
-    const map = { saved:'✓ Saved', saving:'Saving...', syncing:'↑ Syncing...', synced:'✓ Synced', unsaved:'● Unsaved', error:'✗ Error', '':'' };
+    const map = { saved: '✓ Saved', saving: 'Saving...', syncing: '↑ Syncing...', synced: '✓ Synced', unsaved: '● Unsaved', error: '✗ Error', '': '' };
     saveStatus.textContent = map[status] ?? status;
-    saveStatus.className   = 'save-status ' + status;
+    saveStatus.className = 'save-status ' + status;
 }
 
 function enableHeaderBtns(on) {
-    saveBtn.disabled       = !on;
-    exportPdfBtn.disabled  = !on;
+    saveBtn.disabled = !on;
+    exportPdfBtn.disabled = !on;
     exportDocxBtn.disabled = !on;
 }
 
 function escapeHtml(str) {
     if (!str) return '';
-    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // =============================================
 // MODALS
 // =============================================
-function openModal(modal)  { modal.classList.add('active'); }
+function openModal(modal) { modal.classList.add('active'); }
 function closeModal(modal) { modal.classList.remove('active'); }
 
 document.querySelectorAll('.modal-overlay').forEach(o => {
@@ -816,7 +1152,7 @@ let isDark = localStorage.getItem('scripvia_theme') !== 'light';
 
 function applyTheme() {
     document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
-    document.getElementById('themeIcon').textContent  = isDark ? '🌙' : '☀️';
+    document.getElementById('themeIcon').textContent = isDark ? '🌙' : '☀️';
     document.getElementById('themeLabel').textContent = isDark ? 'Dark' : 'Light';
     localStorage.setItem('scripvia_theme', isDark ? 'dark' : 'light');
 }
@@ -870,16 +1206,16 @@ exportDocxBtn.addEventListener('click', () => {
 // =============================================
 async function checkAuthState() {
     try {
-        const data       = await api('GET', '/auth/me');
-        const loginBtn   = document.getElementById('loginBtn');
-        const userInfo   = document.getElementById('userInfo');
+        const data = await api('GET', '/auth/me');
+        const loginBtn = document.getElementById('loginBtn');
+        const userInfo = document.getElementById('userInfo');
         const userAvatar = document.getElementById('userAvatar');
-        const userName   = document.getElementById('userName');
+        const userName = document.getElementById('userName');
 
         if (data.logged_in) {
             loginBtn.style.display = 'none';
             userInfo.classList.remove('hidden');
-            userAvatar.src       = data.user.picture;
+            userAvatar.src = data.user.picture;
             userName.textContent = data.user.name.split(' ')[0];
         } else {
             const guest = localStorage.getItem('scripvia_guest');
@@ -891,17 +1227,17 @@ async function checkAuthState() {
                 userInfo.classList.add('hidden');
             }
         }
-    } catch(e) { console.error('checkAuthState:', e); }
+    } catch (e) { console.error('checkAuthState:', e); }
 }
 
 function showGuestUser(name) {
-    const loginBtn  = document.getElementById('loginBtn');
-    const userInfo  = document.getElementById('userInfo');
-    const userName  = document.getElementById('userName');
+    const loginBtn = document.getElementById('loginBtn');
+    const userInfo = document.getElementById('userInfo');
+    const userName = document.getElementById('userName');
     const userAvatar = document.getElementById('userAvatar');
-    if (loginBtn)   loginBtn.style.display = 'none';
-    if (userInfo)   userInfo.classList.remove('hidden');
-    if (userName)   userName.textContent = name + ' (guest)';
+    if (loginBtn) loginBtn.style.display = 'none';
+    if (userInfo) userInfo.classList.remove('hidden');
+    if (userName) userName.textContent = name + ' (guest)';
     if (userAvatar) userAvatar.style.display = 'none';
 }
 
@@ -909,31 +1245,49 @@ function showGuestUser(name) {
 // EVENT LISTENERS
 // =============================================
 document.getElementById('newProjectBtn').addEventListener('click', () => openModal(newProjectModal));
-document.getElementById('cancelProjectBtn').addEventListener('click',  () => closeModal(newProjectModal));
+document.getElementById('cancelProjectBtn').addEventListener('click', () => closeModal(newProjectModal));
 document.getElementById('cancelProjectBtn2').addEventListener('click', () => closeModal(newProjectModal));
 document.getElementById('confirmProjectBtn').addEventListener('click', createProject);
 projectTitleInput.addEventListener('keydown', e => { if (e.key === 'Enter') createProject(); });
 
-document.getElementById('newDocBtn').addEventListener('click',   () => openModal(newDocModal));
-document.getElementById('cancelDocBtn').addEventListener('click',  () => closeModal(newDocModal));
+document.getElementById('newDocBtn').addEventListener('click', () => openModal(newDocModal));
+document.getElementById('cancelDocBtn').addEventListener('click', () => closeModal(newDocModal));
 document.getElementById('cancelDocBtnX').addEventListener('click', () => closeModal(newDocModal));
 document.getElementById('confirmDocBtn').addEventListener('click', createDocument);
 docTitleModalInput.addEventListener('keydown', e => { if (e.key === 'Enter') createDocument(); });
 
-document.getElementById('newCharBtn').addEventListener('click',    () => openModal(newCharModal));
-document.getElementById('cancelCharBtn').addEventListener('click',  () => closeModal(newCharModal));
-document.getElementById('cancelCharBtnX').addEventListener('click', () => closeModal(newCharModal));
-document.getElementById('confirmCharBtn').addEventListener('click', createCharacter);
+document.getElementById('newCharBtn').addEventListener('click', () => openModal(newCharModal));
+document.getElementById('cancelCharBtn').addEventListener('click', () => { resetCharModal(); closeModal(newCharModal); });
+document.getElementById('cancelCharBtnX').addEventListener('click', () => { resetCharModal(); closeModal(newCharModal); });
+document.getElementById('confirmCharBtn').addEventListener('click', () => {
+    const btn = document.getElementById('confirmCharBtn');
+    const mode = btn.dataset.mode;
+    const id = btn.dataset.editId;
+    if (mode === 'edit' && id) {
+        saveEditChar(parseInt(id));
+    } else {
+        createCharacter();
+    }
+});
 
-document.getElementById('newSceneBtn').addEventListener('click',    () => openModal(newSceneModal));
-document.getElementById('cancelSceneBtn').addEventListener('click',  () => closeModal(newSceneModal));
+document.getElementById('newSceneBtn').addEventListener('click', () => openModal(newSceneModal));
+document.getElementById('cancelSceneBtn').addEventListener('click', () => closeModal(newSceneModal));
 document.getElementById('cancelSceneBtnX').addEventListener('click', () => closeModal(newSceneModal));
 document.getElementById('confirmSceneBtn').addEventListener('click', createScene);
 
-document.getElementById('newLoreBtn').addEventListener('click',    () => openModal(newLoreModal));
-document.getElementById('cancelLoreBtn').addEventListener('click',  () => closeModal(newLoreModal));
-document.getElementById('cancelLoreBtnX').addEventListener('click', () => closeModal(newLoreModal));
-document.getElementById('confirmLoreBtn').addEventListener('click', createLore);
+document.getElementById('newLoreBtn').addEventListener('click', () => openModal(newLoreModal));
+document.getElementById('cancelLoreBtn').addEventListener('click', () => { resetLoreModal(); closeModal(newLoreModal); });
+document.getElementById('cancelLoreBtnX').addEventListener('click', () => { resetLoreModal(); closeModal(newLoreModal); });
+document.getElementById('confirmLoreBtn').addEventListener('click', () => {
+    const btn = document.getElementById('confirmLoreBtn');
+    const mode = btn.dataset.mode;
+    const id = btn.dataset.editId;
+    if (mode === 'edit' && id) {
+        saveEditLore(parseInt(id));
+    } else {
+        createLore();
+    }
+});
 
 saveBtn.addEventListener('click', saveDocument);
 
@@ -941,8 +1295,10 @@ saveBtn.addEventListener('click', saveDocument);
 // INIT
 // =============================================
 document.addEventListener('DOMContentLoaded', () => {
+    setupImageUpload('charImageFile', 'charImageInput', 'charImgPreview', 'charImgPreviewEl', 'clearCharImg');
+    setupImageUpload('loreImageFile', 'loreImageInput', 'loreImgPreview', 'loreImgPreviewEl', 'clearLoreImg');
     const guest = localStorage.getItem('scripvia_guest');
-
+    document.getElementById('wikiCardClose').addEventListener('click', hideWikiTooltip);
     fetch('/auth/me')
         .then(r => r.json())
         .then(data => {
