@@ -1,5 +1,5 @@
 # app.py
-from flask import Flask, render_template, request, jsonify, redirect, session
+from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 from config import Config
@@ -11,8 +11,17 @@ import re
 import threading
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaInMemoryUpload
-
 from datetime import timedelta
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, HRFlowable
+from reportlab.lib import colors
+from docx import Document as DocxDocument
+from docx.shared import Inches, Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from bs4 import BeautifulSoup
+import io
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -64,6 +73,7 @@ class Project(db.Model):
     characters = db.relationship('Character', backref='project', lazy=True, cascade='all, delete-orphan')
     scenes     = db.relationship('Scene', backref='project', lazy=True, cascade='all, delete-orphan')
     lore_items = db.relationship('LoreItem', backref='project', lazy=True, cascade='all, delete-orphan')
+    notes = db.relationship('Note', backref='project', lazy=True, cascade='all, delete-orphan')
 
     # Genres that unlock Characters, Scenes, Lore tabs
     CREATIVE_GENRES = ['fantasy', 'sci-fi', 'fiction', 'romance', 'mystery', 'thriller', 'horror', 'historical']
@@ -180,6 +190,48 @@ class LoreItem(db.Model):
             'image_url':   self.image_url,
             'extra_notes': self.extra_notes,
             'created_at':  self.created_at.isoformat()
+        }
+
+
+class Note(db.Model):
+    """Quick notes per project — visible while writing"""
+    id         = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
+    content    = db.Column(db.Text, default='')
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id':         self.id,
+            'project_id': self.project_id,
+            'content':    self.content,
+            'updated_at': self.updated_at.isoformat()
+        }
+
+class CharacterRelationship(db.Model):
+    """A relationship between two characters"""
+    id           = db.Column(db.Integer, primary_key=True)
+    project_id   = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
+    char_a_id    = db.Column(db.Integer, db.ForeignKey('character.id'), nullable=False)
+    char_b_id    = db.Column(db.Integer, db.ForeignKey('character.id'), nullable=False)
+    relation_type = db.Column(db.String(100), default='')  # e.g. rivals, lovers, allies
+    description  = db.Column(db.Text, default='')
+    color        = db.Column(db.String(20), default='#7b6fb0')
+
+    char_a = db.relationship('Character', foreign_keys=[char_a_id])
+    char_b = db.relationship('Character', foreign_keys=[char_b_id])
+
+    def to_dict(self):
+        return {
+            'id':            self.id,
+            'project_id':    self.project_id,
+            'char_a_id':     self.char_a_id,
+            'char_b_id':     self.char_b_id,
+            'char_a_name':   self.char_a.name if self.char_a else '',
+            'char_b_name':   self.char_b.name if self.char_b else '',
+            'relation_type': self.relation_type,
+            'description':   self.description,
+            'color':         self.color
         }
 
 # =============================================
@@ -685,7 +737,7 @@ def create_character(project_id):
                 except Exception as e:
                     print(f"Character Drive sync error: {e}")
 
-        t = threading.Thread(target=sync_char_bg, args=(app, char.id, project.id, user.id))
+        t = threading.Thread(target=sync_char_bg, args=(app, char.id, project_id, user.id))
         t.daemon = True
         t.start()
 
@@ -868,6 +920,208 @@ def delete_lore_item(item_id):
     db.session.commit()
     return jsonify({'message': 'Deleted'})
 
+# =============================================
+# NOTES ROUTES
+# =============================================
+
+@app.route('/api/projects/<int:project_id>/notes', methods=['GET'])
+def get_notes(project_id):
+    Project.query.get_or_404(project_id)
+    note = Note.query.filter_by(project_id=project_id).first()
+    if not note:
+        note = Note(project_id=project_id, content='')
+        db.session.add(note)
+        db.session.commit()
+    return jsonify(note.to_dict())
+
+@app.route('/api/projects/<int:project_id>/notes', methods=['PUT'])
+def update_notes(project_id):
+    Project.query.get_or_404(project_id)
+    note = Note.query.filter_by(project_id=project_id).first()
+    if not note:
+        note = Note(project_id=project_id, content='')
+        db.session.add(note)
+    data = request.get_json()
+    note.content    = data.get('content', '')
+    note.updated_at = datetime.utcnow()
+    db.session.commit()
+
+    # Sync to Drive in background
+    user = get_current_user()
+    if user and user.access_token:
+        def sync_notes_bg(app, project_id, content, user_id):
+            with app.app_context():
+                u = User.query.get(user_id)
+                p = Project.query.get(project_id)
+                if not u or not p: return
+                try:
+                    drive = get_drive_service(u)
+                    if not u.scripvia_folder_id:
+                        u.scripvia_folder_id = get_or_create_folder(drive, 'Scripvia')
+                        db.session.commit()
+                    if not p.drive_folder_id:
+                        p.drive_folder_id = get_or_create_folder(drive, p.title, parent_id=u.scripvia_folder_id)
+                        db.session.commit()
+
+                    # Look for existing notes file and update, or create new one
+                    query = f"name='_notes.txt' and '{p.drive_folder_id}' in parents and trashed=false"
+                    results = drive.files().list(q=query, fields='files(id)').execute()
+                    files   = results.get('files', [])
+
+                    if files:
+                        # Update existing
+                        drive.files().update(
+                            fileId=files[0]['id'],
+                            media_body=__import__('googleapiclient.http', fromlist=['MediaInMemoryUpload']).MediaInMemoryUpload(
+                                content.encode('utf-8'), mimetype='text/plain'
+                            )
+                        ).execute()
+                    else:
+                        # Create new
+                        create_drive_file(drive, '_notes', content, p.drive_folder_id)
+
+                    print(f"✅ Notes synced to Drive for: {p.title}")
+                except Exception as e:
+                    print(f"Notes Drive sync error: {e}")
+
+        t = threading.Thread(target=sync_notes_bg, args=(app, project_id, note.content, user.id))
+        t.daemon = True
+        t.start()
+
+    return jsonify(note.to_dict())
+
+# =============================================
+# CHARACTER RELATIONSHIP ROUTES
+# =============================================
+
+@app.route('/api/projects/<int:project_id>/relationships', methods=['GET'])
+def get_relationships(project_id):
+    Project.query.get_or_404(project_id)
+    rels = CharacterRelationship.query.filter_by(project_id=project_id).all()
+    return jsonify([r.to_dict() for r in rels])
+
+@app.route('/api/projects/<int:project_id>/relationships', methods=['POST'])
+def create_relationship(project_id):
+    Project.query.get_or_404(project_id)
+    data = request.get_json()
+    if not data or not data.get('char_a_id') or not data.get('char_b_id'):
+        return jsonify({'error': 'Both characters required'}), 400
+    if data['char_a_id'] == data['char_b_id']:
+        return jsonify({'error': 'Cannot relate a character to themselves'}), 400
+
+    rel = CharacterRelationship(
+        project_id    = project_id,
+        char_a_id     = data['char_a_id'],
+        char_b_id     = data['char_b_id'],
+        relation_type = data.get('relation_type', ''),
+        description   = data.get('description', ''),
+        color         = data.get('color', '#7b6fb0')
+    )
+    db.session.add(rel)
+    db.session.commit()
+    return jsonify(rel.to_dict()), 201
+
+@app.route('/api/relationships/<int:rel_id>', methods=['DELETE'])
+def delete_relationship(rel_id):
+    rel = CharacterRelationship.query.get_or_404(rel_id)
+    db.session.delete(rel)
+    db.session.commit()
+    return jsonify({'message': 'Deleted'})
+
+@app.route('/api/relationships/<int:rel_id>', methods=['PUT'])
+def update_relationship(rel_id):
+    rel  = CharacterRelationship.query.get_or_404(rel_id)
+    data = request.get_json()
+    for field in ['relation_type', 'description', 'color']:
+        if field in data:
+            setattr(rel, field, data[field])
+    db.session.commit()
+    return jsonify(rel.to_dict())
+
+# =============================================
+# SEARCH ROUTE
+# =============================================
+
+@app.route('/api/projects/<int:project_id>/search', methods=['GET'])
+def search_project(project_id):
+    Project.query.get_or_404(project_id)
+    query = request.args.get('q', '').strip().lower()
+    if not query or len(query) < 2:
+        return jsonify([])
+
+    results = []
+
+    # Search documents
+    docs = Document.query.filter_by(project_id=project_id).all()
+    for doc in docs:
+        title_match   = query in doc.title.lower()
+        content_text  = html_to_plain_text(doc.content or '')
+        content_match = query in content_text.lower()
+        if title_match or content_match:
+            # Get snippet around match
+            snippet = ''
+            if content_match:
+                idx     = content_text.lower().find(query)
+                start   = max(0, idx - 60)
+                end     = min(len(content_text), idx + 100)
+                snippet = ('...' if start > 0 else '') + content_text[start:end].strip() + ('...' if end < len(content_text) else '')
+            results.append({
+                'type':     'chapter',
+                'id':       doc.id,
+                'title':    doc.title,
+                'snippet':  snippet,
+                'icon':     '📄'
+            })
+
+    # Search scenes
+    scenes = Scene.query.filter_by(project_id=project_id).all()
+    for scene in scenes:
+        title_match   = query in scene.title.lower()
+        content_text  = html_to_plain_text(scene.content or '')
+        content_match = query in content_text.lower()
+        if title_match or content_match:
+            snippet = ''
+            if content_match:
+                idx     = content_text.lower().find(query)
+                start   = max(0, idx - 60)
+                end     = min(len(content_text), idx + 100)
+                snippet = ('...' if start > 0 else '') + content_text[start:end].strip() + ('...' if end < len(content_text) else '')
+            results.append({
+                'type':    'scene',
+                'id':      scene.id,
+                'title':   scene.title,
+                'snippet': snippet,
+                'icon':    '⚡'
+            })
+
+    # Search characters
+    chars = Character.query.filter_by(project_id=project_id).all()
+    for c in chars:
+        if (query in c.name.lower() or
+            query in (c.personality or '').lower() or
+            query in (c.backstory or '').lower() or
+            query in (c.appearance or '').lower()):
+            results.append({
+                'type':    'character',
+                'id':      c.id,
+                'title':   c.name,
+                'snippet': c.role or '',
+                'icon':    '👤'
+            })
+
+    # Search lore
+    lore = LoreItem.query.filter_by(project_id=project_id).all()
+    for l in lore:
+        if query in l.name.lower() or query in (l.description or '').lower():
+            results.append({
+                'type':    'lore',
+                'id':      l.id,
+                'title':   l.name,
+                'snippet': l.category or '',
+                'icon':    '📖'
+            })
+
+    return jsonify(results)
 
 # =============================================
 # WIKI TOOLTIP ROUTE
@@ -1221,6 +1475,321 @@ def export_docx(doc_id):
         download_name = f"{doc.title}.docx",
         mimetype      = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     )
+
+# =============================================
+# FULL PROJECT EXPORT
+# =============================================
+
+@app.route('/api/projects/<int:project_id>/export/pdf', methods=['GET'])
+def export_project_pdf(project_id):
+    project = Project.query.get_or_404(project_id)
+    docs    = Document.query.filter_by(project_id=project_id).order_by(
+        Document.order_index.asc(), Document.created_at.asc()
+    ).all()
+
+    buffer  = io.BytesIO()
+    pdf_doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=1.2*inch, leftMargin=1.2*inch,
+        topMargin=1.2*inch,   bottomMargin=1.2*inch
+    )
+
+    styles   = getSampleStyleSheet()
+    elements = []
+
+    # ---- COVER PAGE ----
+    cover_title = ParagraphStyle(
+        'CoverTitle',
+        parent    = styles['Title'],
+        fontSize  = 36,
+        textColor = colors.HexColor('#7b6fb0'),
+        spaceAfter = 20,
+        fontName  = 'Times-Bold',
+        alignment = 1
+    )
+    cover_sub = ParagraphStyle(
+        'CoverSub',
+        parent    = styles['Normal'],
+        fontSize  = 13,
+        textColor = colors.HexColor('#888888'),
+        spaceAfter = 8,
+        alignment = 1
+    )
+
+    elements.append(Spacer(1, 2*inch))
+    elements.append(Paragraph(project.title, cover_title))
+    elements.append(Spacer(1, 0.2*inch))
+
+    if project.description:
+        elements.append(Paragraph(project.description, cover_sub))
+
+    elements.append(Spacer(1, 0.3*inch))
+    elements.append(Paragraph(f'Genre: {project.genre.title()}', cover_sub))
+    elements.append(Paragraph(f'{len(docs)} chapter{"s" if len(docs) != 1 else ""}', cover_sub))
+
+    # Total words
+    total_words = sum(
+        len(html_to_plain_text(d.content or '').split())
+        for d in docs if d.content
+    )
+    elements.append(Paragraph(f'{total_words:,} words', cover_sub))
+    elements.append(PageBreak())
+
+    # ---- TABLE OF CONTENTS ----
+    toc_title_style = ParagraphStyle(
+        'TOCTitle',
+        parent    = styles['Heading1'],
+        fontSize  = 20,
+        textColor = colors.HexColor('#7b6fb0'),
+        spaceAfter = 20,
+        fontName  = 'Times-Bold'
+    )
+    toc_entry_style = ParagraphStyle(
+        'TOCEntry',
+        parent    = styles['Normal'],
+        fontSize  = 12,
+        textColor = colors.HexColor('#333333'),
+        spaceAfter = 8,
+        leftIndent = 10
+    )
+
+    elements.append(Paragraph('Table of Contents', toc_title_style))
+    elements.append(HRFlowable(width='100%', thickness=1, color=colors.HexColor('#cccccc')))
+    elements.append(Spacer(1, 0.15*inch))
+
+    for i, doc in enumerate(docs, 1):
+        elements.append(Paragraph(f'{i}.  {doc.title}', toc_entry_style))
+
+    elements.append(PageBreak())
+
+    # ---- CHAPTERS ----
+    chapter_title_style = ParagraphStyle(
+        'ChapterTitle',
+        parent     = styles['Heading1'],
+        fontSize   = 24,
+        textColor  = colors.HexColor('#7b6fb0'),
+        spaceAfter = 6,
+        fontName   = 'Times-Bold',
+        alignment  = 1
+    )
+    chapter_num_style = ParagraphStyle(
+        'ChapterNum',
+        parent     = styles['Normal'],
+        fontSize   = 11,
+        textColor  = colors.HexColor('#aaaaaa'),
+        spaceAfter = 20,
+        alignment  = 1
+    )
+    body_style = ParagraphStyle(
+        'Body',
+        parent     = styles['Normal'],
+        fontSize   = 12,
+        leading    = 20,
+        textColor  = colors.HexColor('#1a1a1a'),
+        spaceAfter = 12,
+        firstLineIndent = 24
+    )
+    h2_style = ParagraphStyle(
+        'H2',
+        parent     = styles['Heading2'],
+        fontSize   = 16,
+        textColor  = colors.HexColor('#5548a0'),
+        spaceAfter = 10,
+        fontName   = 'Times-Bold'
+    )
+    h3_style = ParagraphStyle(
+        'H3',
+        parent     = styles['Heading3'],
+        fontSize   = 13,
+        textColor  = colors.HexColor('#7b6fb0'),
+        spaceAfter = 8,
+        fontName   = 'Times-Bold'
+    )
+
+    for i, doc in enumerate(docs, 1):
+        elements.append(Paragraph(f'Chapter {i}', chapter_num_style))
+        elements.append(Paragraph(doc.title, chapter_title_style))
+        elements.append(HRFlowable(width='60%', thickness=1, color=colors.HexColor('#7b6fb0'), hAlign='CENTER'))
+        elements.append(Spacer(1, 0.3*inch))
+
+        if doc.content:
+            soup = BeautifulSoup(doc.content, 'html.parser')
+            for el in soup.find_all(['p','h1','h2','h3','h4','blockquote','li']):
+                text = el.get_text().strip()
+                if not text:
+                    continue
+                tag = el.name
+                if tag == 'h1':
+                    elements.append(Paragraph(text, chapter_title_style))
+                elif tag in ['h2','h3','h4']:
+                    elements.append(Paragraph(text, h2_style if tag == 'h2' else h3_style))
+                elif tag == 'blockquote':
+                    bq_style = ParagraphStyle('BQ', parent=body_style, leftIndent=30, textColor=colors.HexColor('#666666'), fontName='Times-Italic')
+                    elements.append(Paragraph(f'"{text}"', bq_style))
+                elif tag == 'li':
+                    elements.append(Paragraph(f'• {text}', body_style))
+                else:
+                    if text:
+                        elements.append(Paragraph(text, body_style))
+
+        if i < len(docs):
+            elements.append(PageBreak())
+
+    pdf_doc.build(elements)
+    buffer.seek(0)
+
+    filename = f"{project.title.replace(' ', '_')}_complete.pdf"
+    return send_file(
+        buffer,
+        mimetype    = 'application/pdf',
+        as_attachment = True,
+        download_name = filename
+    )
+
+
+@app.route('/api/projects/<int:project_id>/export/docx', methods=['GET'])
+def export_project_docx(project_id):
+    project = Project.query.get_or_404(project_id)
+    docs    = Document.query.filter_by(project_id=project_id).order_by(
+        Document.order_index.asc(), Document.created_at.asc()
+    ).all()
+
+    docx = DocxDocument()
+
+    # Page margins
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    section = docx.sections[0]
+    section.top_margin    = Inches(1.2)
+    section.bottom_margin = Inches(1.2)
+    section.left_margin   = Inches(1.3)
+    section.right_margin  = Inches(1.3)
+
+    def set_color(run, hex_color):
+        run.font.color.rgb = RGBColor(
+            int(hex_color[0:2], 16),
+            int(hex_color[2:4], 16),
+            int(hex_color[4:6], 16)
+        )
+
+    # ---- COVER PAGE ----
+    cover = docx.add_paragraph()
+    cover.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for _ in range(8): docx.add_paragraph('')
+
+    title_para = docx.add_paragraph()
+    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title_run = title_para.add_run(project.title)
+    title_run.font.size = Pt(36)
+    title_run.font.bold = True
+    set_color(title_run, '7b6fb0')
+
+    if project.description:
+        desc_para = docx.add_paragraph()
+        desc_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        desc_run = desc_para.add_run(project.description)
+        desc_run.font.size = Pt(13)
+        set_color(desc_run, '888888')
+
+    meta_para = docx.add_paragraph()
+    meta_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    total_words = sum(
+        len(html_to_plain_text(d.content or '').split())
+        for d in docs if d.content
+    )
+    meta_run = meta_para.add_run(f'{project.genre.title()} · {len(docs)} chapters · {total_words:,} words')
+    meta_run.font.size = Pt(11)
+    set_color(meta_run, 'aaaaaa')
+
+    docx.add_page_break()
+
+    # ---- TABLE OF CONTENTS ----
+    toc_heading = docx.add_paragraph()
+    toc_run = toc_heading.add_run('Table of Contents')
+    toc_run.font.size = Pt(20)
+    toc_run.font.bold = True
+    set_color(toc_run, '7b6fb0')
+
+    for i, doc in enumerate(docs, 1):
+        toc_entry = docx.add_paragraph()
+        toc_run = toc_entry.add_run(f'{i}.   {doc.title}')
+        toc_run.font.size = Pt(12)
+        set_color(toc_run, '333333')
+
+    docx.add_page_break()
+
+    # ---- CHAPTERS ----
+    for i, doc in enumerate(docs, 1):
+        # Chapter number
+        num_para = docx.add_paragraph()
+        num_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        num_run = num_para.add_run(f'Chapter {i}')
+        num_run.font.size = Pt(11)
+        set_color(num_run, 'aaaaaa')
+
+        # Chapter title
+        ch_para = docx.add_paragraph()
+        ch_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        ch_run = ch_para.add_run(doc.title)
+        ch_run.font.size = Pt(24)
+        ch_run.font.bold = True
+        set_color(ch_run, '7b6fb0')
+
+        docx.add_paragraph('')
+
+        if doc.content:
+            soup = BeautifulSoup(doc.content, 'html.parser')
+            for el in soup.find_all(['p','h1','h2','h3','h4','blockquote','li']):
+                text = el.get_text().strip()
+                if not text: continue
+                tag = el.name
+
+                if tag == 'h1':
+                    p = docx.add_paragraph()
+                    r = p.add_run(text)
+                    r.font.size = Pt(20)
+                    r.font.bold = True
+                    set_color(r, '7b6fb0')
+                elif tag in ['h2','h3','h4']:
+                    p = docx.add_paragraph()
+                    r = p.add_run(text)
+                    r.font.size = Pt(16 if tag == 'h2' else 13)
+                    r.font.bold = True
+                    set_color(r, '5548a0')
+                elif tag == 'blockquote':
+                    p = docx.add_paragraph()
+                    p.paragraph_format.left_indent = Inches(0.5)
+                    r = p.add_run(f'"{text}"')
+                    r.font.size   = Pt(12)
+                    r.font.italic = True
+                    set_color(r, '666666')
+                elif tag == 'li':
+                    p = docx.add_paragraph(style='List Bullet')
+                    r = p.add_run(text)
+                    r.font.size = Pt(12)
+                else:
+                    p = docx.add_paragraph()
+                    p.paragraph_format.first_line_indent = Inches(0.3)
+                    r = p.add_run(text)
+                    r.font.size = Pt(12)
+                    set_color(r, '1a1a1a')
+
+        if i < len(docs):
+            docx.add_page_break()
+
+    buffer = io.BytesIO()
+    docx.save(buffer)
+    buffer.seek(0)
+
+    filename = f"{project.title.replace(' ', '_')}_complete.docx"
+    return send_file(
+        buffer,
+        mimetype      = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        as_attachment = True,
+        download_name = filename
+    )
+
 # =============================================
 # ENTRY POINT
 # =============================================
