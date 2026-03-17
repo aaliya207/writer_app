@@ -1,1 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment
 .env
+
+# Flask
+instance/
+
+# Build files
+build/
+dist/
+
+# PyInstaller
+*.spec
+
+# Electron
+electron/node_modules/
+electron/dist/
+
+# OS junk
+.DS_Store
+Thumbs.db

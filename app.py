@@ -14,9 +14,25 @@ from docx import Document as DocxDocument
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from bs4 import BeautifulSoup
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
+# Handle PyInstaller bundle paths
+if hasattr(sys, '_MEIPASS'):
+    BASE_DIR = sys._MEIPASS
+else:
+    BASE_DIR = os.path.abspath('.')
+
+app = Flask(__name__,
+    template_folder=os.path.join(BASE_DIR, 'templates'),
+    static_folder=os.path.join(BASE_DIR, 'static')
+)
 
 app = Flask(__name__)
 app.config.from_object(Config)
+# Store database in user's home directory so it persists
+USER_DATA_DIR = os.path.join(os.path.expanduser('~'), 'Scripvia')
+os.makedirs(USER_DATA_DIR, exist_ok=True)
+app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(USER_DATA_DIR, 'scripvia.db')}"
 app.permanent_session_lifetime = timedelta(days=30)
 
 db = SQLAlchemy(app)
@@ -1125,6 +1141,6 @@ def export_project_docx(project_id):
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-        print("✅ Database initialized")
-    print("🚀 Scripvia running at http://localhost:5000")
-    app.run(debug=True)
+        print("Database initialized")
+    print("Scripvia running at http://localhost:5000")
+    app.run(debug=False, use_reloader=False)

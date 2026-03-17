@@ -1,0 +1,48 @@
+{
+  "name": "scripvia",
+  "version": "1.0.0",
+  "description": "Scripvia — personal writing app",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win --x64",
+    "build:dir": "electron-builder --win --x64 --dir"
+  },
+  "build": {
+    "appId": "com.scripvia.app",
+    "productName": "Scripvia",
+    "copyright": "Copyright © 2025",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "icon": "assets/scripvia.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Scripvia"
+    },
+    "extraResources": [
+      {
+        "from": "../dist/app/",
+        "to": "flask_app/",
+        "filter": ["**/*"]
+      }
+    ],
+    "files": [
+      "main.js",
+      "loading.html",
+      "assets/**"
+    ]
+  },
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^24.0.0"
+  }
+}

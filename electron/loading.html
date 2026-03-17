@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <title>Loading Scripvia...</title>
+
+    <!-- SAME fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;600&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+
+    <!-- USE YOUR ACTUAL CSS -->
+    <link rel="stylesheet" href="./loading.css">
+
+    <style>
+        /* Center loading content */
+        .loader-wrap {
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 16px;
+            z-index: 2;
+            position: relative;
+        }
+
+        .loader-logo {
+            width: 60px;
+            height: 60px;
+            border-radius: 12px;
+            background: var(--gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-display);
+            font-size: 28px;
+            color: white;
+            animation: pulse 1.5s infinite ease-in-out;
+        }
+
+        .loader-text {
+            font-family: var(--font-ui);
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 0.8; }
+            50% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(1); opacity: 0.8; }
+        }
+    </style>
+</head>
+
+<body>
+
+<!-- SAME BACKGROUND -->
+<div class="login-bg">
+    <div class="orb orb1"></div>
+    <div class="orb orb2"></div>
+    <div class="orb orb3"></div>
+</div>
+
+<!-- LOADER -->
+<div class="loader-wrap">
+    <div class="loader-logo">S</div>
+    <div class="loader-text">Starting Scripvia...</div>
+</div>
+
+</body>
+</html>
