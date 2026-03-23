@@ -401,6 +401,7 @@ body { display: flex; height: 100vh; }
     overflow-y: auto;
     display: none;
     flex-direction: column;
+    padding-bottom: 48px;
 }
 .editor-wrapper.visible { display: flex; }
 
@@ -426,7 +427,7 @@ body { display: flex; height: 100vh; }
 }
 
 .ql-editor {
-    padding: 48px 15% !important;
+    padding: 48px 15% 400px !important;
     min-height: 100%;
     caret-color: var(--accent-bright);
     color: var(--text-primary) !important;
@@ -896,6 +897,13 @@ body { display: flex; height: 100vh; }
     font-family: var(--font-ui);
     flex-shrink: 0;
     flex-wrap: wrap;
+    position: fixed;
+    bottom: 0;
+    left: 256px;
+    right: 0;
+    z-index: 100;
+    width: calc(100% - 256px);
+    height: 48px;
 }
 
 .stats-divider {
@@ -1723,6 +1731,10 @@ body.focus-mode .editor-header,
 body.focus-mode .editor-stats-bar,
 body.focus-mode .notes-panel {
     display: none !important;
+}
+
+body.focus-mode .editor-wrapper {
+    padding-bottom: 0;
 }
 
 body.focus-mode .editor-area {

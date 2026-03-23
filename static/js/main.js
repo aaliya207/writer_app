@@ -1,62 +1,62 @@
 // Scripvia — Main Frontend Logic v0.2
 
 // --- STATE ---
-let currentProjectId   = null;
+let currentProjectId = null;
 let currentProjectData = null;
-let currentDocId       = null;
-let currentDocType     = 'chapter';
-let quill              = null;
-let autoSaveTimer      = null;
-let countdownTimer     = null;
-let secondsUntilSave   = 30;
-let pendingSync        = false;
-let openTabs           = [];
-let wikiData           = {};
+let currentDocId = null;
+let currentDocType = 'chapter';
+let quill = null;
+let autoSaveTimer = null;
+let countdownTimer = null;
+let secondsUntilSave = 30;
+let pendingSync = false;
+let openTabs = [];
+let wikiData = {};
 
 // --- DOM REFS ---
-const projectsList      = document.getElementById('projectsList');
-const documentsList     = document.getElementById('documentsList');
-const charactersList    = document.getElementById('charactersList');
-const scenesList        = document.getElementById('scenesList');
-const loreList          = document.getElementById('loreList');
+const projectsList = document.getElementById('projectsList');
+const documentsList = document.getElementById('documentsList');
+const charactersList = document.getElementById('charactersList');
+const scenesList = document.getElementById('scenesList');
+const loreList = document.getElementById('loreList');
 const relationshipsList = document.getElementById('relationshipsList');
-const projectDetail     = document.getElementById('projectDetail');
-const projectsSection   = document.getElementById('projectsSection');
+const projectDetail = document.getElementById('projectDetail');
+const projectsSection = document.getElementById('projectsSection');
 const currentProjectName = document.getElementById('currentProjectName');
-const welcomeScreen     = document.getElementById('welcomeScreen');
-const editorWrapper     = document.getElementById('editorWrapper');
-const docTitleInput     = document.getElementById('docTitleInput');
-const saveStatus        = document.getElementById('saveStatus');
-const saveBtn           = document.getElementById('saveBtn');
-const exportPdfBtn      = document.getElementById('exportPdfBtn');
-const exportDocxBtn     = document.getElementById('exportDocxBtn');
-const wordCountEl       = document.getElementById('wordCount');
-const charCountEl       = document.getElementById('charCount');
-const readTimeEl        = document.getElementById('readTime');
-const lastSavedTimeEl   = document.getElementById('lastSavedTime');
-const tabsBar           = document.getElementById('tabsBar');
-const openTabsEl        = document.getElementById('openTabs');
-const wikiTooltip       = document.getElementById('wikiTooltip');
-const newProjectModal   = document.getElementById('newProjectModal');
-const newDocModal       = document.getElementById('newDocModal');
-const newCharModal      = document.getElementById('newCharModal');
-const newSceneModal     = document.getElementById('newSceneModal');
-const newLoreModal      = document.getElementById('newLoreModal');
-const newRelModal       = document.getElementById('newRelModal');
-const projectTitleInput  = document.getElementById('projectTitleInput');
-const projectDescInput   = document.getElementById('projectDescInput');
-const projectGenreInput  = document.getElementById('projectGenreInput');
+const welcomeScreen = document.getElementById('welcomeScreen');
+const editorWrapper = document.getElementById('editorWrapper');
+const docTitleInput = document.getElementById('docTitleInput');
+const saveStatus = document.getElementById('saveStatus');
+const saveBtn = document.getElementById('saveBtn');
+const exportPdfBtn = document.getElementById('exportPdfBtn');
+const exportDocxBtn = document.getElementById('exportDocxBtn');
+const wordCountEl = document.getElementById('wordCount');
+const charCountEl = document.getElementById('charCount');
+const readTimeEl = document.getElementById('readTime');
+const lastSavedTimeEl = document.getElementById('lastSavedTime');
+const tabsBar = document.getElementById('tabsBar');
+const openTabsEl = document.getElementById('openTabs');
+const wikiTooltip = document.getElementById('wikiTooltip');
+const newProjectModal = document.getElementById('newProjectModal');
+const newDocModal = document.getElementById('newDocModal');
+const newCharModal = document.getElementById('newCharModal');
+const newSceneModal = document.getElementById('newSceneModal');
+const newLoreModal = document.getElementById('newLoreModal');
+const newRelModal = document.getElementById('newRelModal');
+const projectTitleInput = document.getElementById('projectTitleInput');
+const projectDescInput = document.getElementById('projectDescInput');
+const projectGenreInput = document.getElementById('projectGenreInput');
 const docTitleModalInput = document.getElementById('docTitleModalInput');
 
-const CREATIVE_GENRES = ['fantasy','sci-fi','fiction','romance','mystery','thriller','horror','historical'];
+const CREATIVE_GENRES = ['fantasy', 'sci-fi', 'fiction', 'romance', 'mystery', 'thriller', 'horror', 'historical'];
 
 // --- IMAGE UPLOAD ---
 function setupImageUpload(fileInputId, urlInputId, previewWrapId, previewImgId, clearBtnId) {
-    const fileInput  = document.getElementById(fileInputId);
-    const urlInput   = document.getElementById(urlInputId);
+    const fileInput = document.getElementById(fileInputId);
+    const urlInput = document.getElementById(urlInputId);
     const previewWrap = document.getElementById(previewWrapId);
-    const previewImg  = document.getElementById(previewImgId);
-    const clearBtn    = document.getElementById(clearBtnId);
+    const previewImg = document.getElementById(previewImgId);
+    const clearBtn = document.getElementById(clearBtnId);
 
     fileInput.addEventListener('change', () => {
         const file = fileInput.files[0];
@@ -116,37 +116,41 @@ function initQuill() {
         placeholder: 'Start writing...',
         modules: {
             toolbar: [
-                [{ header: [1,2,3,false] }],
-                ['bold','italic','underline','strike'],
-                [{ color:[] },{ background:[] }],
-                [{ list:'ordered' },{ list:'bullet' }],
-                ['blockquote','code-block'],
-                [{ align:[] }],
-                [{ indent:'-1' },{ indent:'+1' }],
-                ['link'],['clean']
+                [{ header: [1, 2, 3, false] }],
+                ['bold', 'italic', 'underline', 'strike'],
+                [{ color: [] }, { background: [] }],
+                [{ list: 'ordered' }, { list: 'bullet' }],
+                ['blockquote', 'code-block'],
+                [{ align: [] }],
+                [{ indent: '-1' }, { indent: '+1' }],
+                ['link'], ['clean']
             ]
         }
     });
-
-    quill.on('text-change', () => {
-        setSaveStatus('unsaved');
-        saveToLocalStorage();
-        resetCountdown();
-        updateStats();
-    });
-
-    let wikiHoverTimer = null;
-    quill.root.addEventListener('mousemove', (e) => {
-        clearTimeout(wikiHoverTimer);
-        wikiHoverTimer = setTimeout(() => handleWikiHover(e), 400);
-    });
-    quill.root.addEventListener('mouseleave', () => {
-        clearTimeout(wikiHoverTimer);
-        setTimeout(() => { if (!wikiTooltip.matches(':hover')) hideWikiTooltip(); }, 200);
-    });
+    quill.on('text-change', function() {
+    setSaveStatus('unsaved');
+    saveToLocalStorage();
+    resetCountdown();
+    updateStats();
+    setTimeout(() => {
+        const selection = quill.getSelection();
+        if (selection) {
+            const bounds = quill.getBounds(selection.index);
+            const container = document.getElementById('editorWrapper');
+            
+            if (bounds && container) {
+                const editorTop = document.querySelector('.ql-editor').offsetTop;
+                const cursorPosInEditor = editorTop + bounds.top;
+                const targetScrollPos = cursorPosInEditor - (container.clientHeight * 0.35);
+                if (cursorPosInEditor > container.scrollTop + (container.clientHeight * 0.35)) {
+                    container.scrollTop = Math.max(0, targetScrollPos);
+                }
+            }
+        }
+    }, 0);
+});
     wikiTooltip.addEventListener('mouseleave', hideWikiTooltip);
 }
-
 // --- API ---
 async function api(method, url, body = null) {
     const opts = { method, headers: { 'Content-Type': 'application/json' } };
@@ -159,7 +163,7 @@ async function api(method, url, body = null) {
 // --- PROJECTS ---
 async function loadProjects() {
     try { renderProjects(await api('GET', '/api/projects')); }
-    catch(e) { console.error('loadProjects:', e); }
+    catch (e) { console.error('loadProjects:', e); }
 }
 
 function renderProjects(projects) {
@@ -176,7 +180,7 @@ function renderProjects(projects) {
 }
 
 function genreEmoji(genre) {
-    const map = { fantasy:'⚔️','sci-fi':'🚀',fiction:'📖',romance:'💕',mystery:'🔍',thriller:'⚡',horror:'🕯️',historical:'🏛️',journal:'📓',screenplay:'🎬',poetry:'✨',general:'📝',other:'📌' };
+    const map = { fantasy: '⚔️', 'sci-fi': '🚀', fiction: '📖', romance: '💕', mystery: '🔍', thriller: '⚡', horror: '🕯️', historical: '🏛️', journal: '📓', screenplay: '🎬', poetry: '✨', general: '📝', other: '📌' };
     return map[genre] || '📝';
 }
 
@@ -192,7 +196,7 @@ async function createProject() {
         projectGenreInput.value = 'general';
         await loadProjects();
         selectProject(p.id);
-    } catch(e) { console.error('createProject:', e); }
+    } catch (e) { console.error('createProject:', e); }
     finally { btn.textContent = 'Create Project'; btn.disabled = false; }
 }
 
@@ -203,7 +207,7 @@ async function deleteProject(event, id) {
             await api('DELETE', `/api/projects/${id}`);
             if (currentProjectId === id) { currentProjectId = currentProjectData = null; showProjectList(); hideEditor(); }
             await loadProjects();
-        } catch(e) { console.error('deleteProject:', e); }
+        } catch (e) { console.error('deleteProject:', e); }
     }, 'Delete Project?');
 }
 
@@ -216,46 +220,46 @@ async function selectProject(id) {
         currentProjectName.textContent = currentProjectData.title;
         await showProjectOverview(id);
         const isCreative = CREATIVE_GENRES.includes(currentProjectData.genre);
-        ['tabCharacters','tabScenes','tabLore','tabRelationships'].forEach(tid =>
+        ['tabCharacters', 'tabScenes', 'tabLore', 'tabRelationships'].forEach(tid =>
             document.getElementById(tid).classList.toggle('hidden', !isCreative));
         switchTab('chapters');
         await loadDocuments(id);
         if (isCreative) await loadWikiData(id);
         closeNotesPanel();
-    } catch(e) { console.error('selectProject:', e); }
+    } catch (e) { console.error('selectProject:', e); }
 }
 
-function showProjectList()   { projectsSection.style.display = 'block'; projectDetail.style.display = 'none'; }
-function showProjectDetail() { projectsSection.style.display = 'none';  projectDetail.style.display = 'flex'; }
+function showProjectList() { projectsSection.style.display = 'block'; projectDetail.style.display = 'none'; }
+function showProjectDetail() { projectsSection.style.display = 'none'; projectDetail.style.display = 'flex'; }
 
 // --- PROJECT OVERVIEW ---
 async function showProjectOverview(projectId) {
     try {
         const stats = await api('GET', `/api/projects/${projectId}/stats`);
-        const genreEmojis = { fantasy:'⚔️ Fantasy','sci-fi':'🚀 Sci-Fi',fiction:'📖 Fiction',romance:'💕 Romance',mystery:'🔍 Mystery',thriller:'⚡ Thriller',horror:'🕯️ Horror',historical:'🏛️ Historical',journal:'📓 Journal',screenplay:'🎬 Screenplay',poetry:'✨ Poetry',general:'📝 General',other:'📌 Other' };
+        const genreEmojis = { fantasy: '⚔️ Fantasy', 'sci-fi': '🚀 Sci-Fi', fiction: '📖 Fiction', romance: '💕 Romance', mystery: '🔍 Mystery', thriller: '⚡ Thriller', horror: '🕯️ Horror', historical: '🏛️ Historical', journal: '📓 Journal', screenplay: '🎬 Screenplay', poetry: '✨ Poetry', general: '📝 General', other: '📌 Other' };
 
-        document.getElementById('overviewGenre').textContent    = genreEmojis[stats.genre] || '📝 General';
-        document.getElementById('overviewTitle').textContent    = stats.title;
-        document.getElementById('overviewDesc').textContent     = stats.description || 'No description yet.';
-        document.getElementById('ovWords').textContent          = stats.total_words.toLocaleString();
-        document.getElementById('ovChapters').textContent       = stats.chapter_count;
-        document.getElementById('ovCharacters').textContent     = stats.character_count;
-        document.getElementById('ovScenes').textContent         = stats.scene_count;
-        document.getElementById('ovLore').textContent           = stats.lore_count;
-        document.getElementById('ovLastEdited').textContent     = stats.last_edited ? `✎ Last edited ${formatDateNice(stats.last_edited)}` : '';
-        document.getElementById('ovCreated').textContent        = stats.created_at  ? `✦ Created ${formatDateNice(stats.created_at)}` : '';
+        document.getElementById('overviewGenre').textContent = genreEmojis[stats.genre] || '📝 General';
+        document.getElementById('overviewTitle').textContent = stats.title;
+        document.getElementById('overviewDesc').textContent = stats.description || 'No description yet.';
+        document.getElementById('ovWords').textContent = stats.total_words.toLocaleString();
+        document.getElementById('ovChapters').textContent = stats.chapter_count;
+        document.getElementById('ovCharacters').textContent = stats.character_count;
+        document.getElementById('ovScenes').textContent = stats.scene_count;
+        document.getElementById('ovLore').textContent = stats.lore_count;
+        document.getElementById('ovLastEdited').textContent = stats.last_edited ? `✎ Last edited ${formatDateNice(stats.last_edited)}` : '';
+        document.getElementById('ovCreated').textContent = stats.created_at ? `✦ Created ${formatDateNice(stats.created_at)}` : '';
 
         const isCreative = stats.is_creative;
-        ['ovCharBtn','ovSceneBtn','ovLoreBtn','ovRelBtn'].forEach(id =>
+        ['ovCharBtn', 'ovSceneBtn', 'ovLoreBtn', 'ovRelBtn'].forEach(id =>
             document.getElementById(id).style.display = isCreative ? 'block' : 'none');
-        ['ovCharStat','ovSceneStat','ovLoreStat'].forEach(id =>
+        ['ovCharStat', 'ovSceneStat', 'ovLoreStat'].forEach(id =>
             document.getElementById(id).style.display = isCreative ? 'flex' : 'none');
 
         document.getElementById('projectOverview').style.display = 'flex';
-        document.getElementById('backToOverview').style.display  = 'block';
+        document.getElementById('backToOverview').style.display = 'block';
         welcomeScreen.classList.add('hidden');
         document.getElementById('editorHeader').style.display = 'none';
-    } catch(e) { console.error('showProjectOverview:', e); }
+    } catch (e) { console.error('showProjectOverview:', e); }
 }
 
 function hideOverview() { document.getElementById('projectOverview').style.display = 'none'; }
@@ -289,22 +293,22 @@ function formatDateNice(dateInput) {
         ? new Date(dateInput.endsWith('Z') ? dateInput : dateInput + 'Z')
         : dateInput;
     const diff = Math.floor((new Date() - date) / 1000);
-    if (diff < 60)     return 'just now';
-    if (diff < 3600)   return `${Math.floor(diff/60)}m ago`;
-    if (diff < 86400)  return `${Math.floor(diff/3600)}h ago`;
-    if (diff < 604800) return `${Math.floor(diff/86400)}d ago`;
-    return date.toLocaleDateString('en-IN', { month:'short', day:'numeric', year:'numeric' });
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+    return date.toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 // --- TABS ---
 function switchTab(tabName) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tabName));
     document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.id === `tab-${tabName}`));
-    if (tabName === 'chapters')       loadDocuments(currentProjectId);
-    if (tabName === 'characters')     loadCharacters(currentProjectId);
-    if (tabName === 'scenes')         loadScenes(currentProjectId);
-    if (tabName === 'lore')           loadLore(currentProjectId);
-    if (tabName === 'relationships')  loadRelationships(currentProjectId);
+    if (tabName === 'chapters') loadDocuments(currentProjectId);
+    if (tabName === 'characters') loadCharacters(currentProjectId);
+    if (tabName === 'scenes') loadScenes(currentProjectId);
+    if (tabName === 'lore') loadLore(currentProjectId);
+    if (tabName === 'relationships') loadRelationships(currentProjectId);
 }
 
 document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
@@ -318,7 +322,7 @@ document.getElementById('backToProjects').addEventListener('click', () => {
 // --- DOCUMENTS ---
 async function loadDocuments(projectId) {
     try { renderDocuments(await api('GET', `/api/projects/${projectId}/documents`)); }
-    catch(e) { console.error('loadDocuments:', e); }
+    catch (e) { console.error('loadDocuments:', e); }
 }
 
 function renderDocuments(docs) {
@@ -350,7 +354,7 @@ function onDragOver(e) {
     e.dataTransfer.dropEffect = 'move';
     const target = e.currentTarget;
     if (target === dragSrcEl) return;
-    document.querySelectorAll('#documentsList .item-list-entry').forEach(el => el.classList.remove('drag-over-top','drag-over-bottom'));
+    document.querySelectorAll('#documentsList .item-list-entry').forEach(el => el.classList.remove('drag-over-top', 'drag-over-bottom'));
     const midY = target.getBoundingClientRect().top + target.getBoundingClientRect().height / 2;
     target.classList.add(e.clientY < midY ? 'drag-over-top' : 'drag-over-bottom');
 }
@@ -359,27 +363,27 @@ function onDrop(e) {
     e.preventDefault();
     const target = e.currentTarget;
     if (target === dragSrcEl) return;
-    const items    = [...document.querySelectorAll('#documentsList .item-list-entry')];
-    const srcIdx   = items.indexOf(dragSrcEl);
-    const tgtIdx   = items.indexOf(target);
+    const items = [...document.querySelectorAll('#documentsList .item-list-entry')];
+    const srcIdx = items.indexOf(dragSrcEl);
+    const tgtIdx = items.indexOf(target);
     const reordered = [...items];
     reordered.splice(srcIdx, 1);
     const midY = target.getBoundingClientRect().top + target.getBoundingClientRect().height / 2;
     const insertAt = e.clientY < midY ? tgtIdx : tgtIdx + 1;
     reordered.splice(insertAt > srcIdx ? insertAt - 1 : insertAt, 0, dragSrcEl);
     saveChapterOrder(reordered.map(el => parseInt(el.dataset.id)));
-    document.querySelectorAll('#documentsList .item-list-entry').forEach(el => el.classList.remove('drag-over-top','drag-over-bottom','dragging'));
+    document.querySelectorAll('#documentsList .item-list-entry').forEach(el => el.classList.remove('drag-over-top', 'drag-over-bottom', 'dragging'));
 }
 
 function onDragEnd() {
-    document.querySelectorAll('#documentsList .item-list-entry').forEach(el => el.classList.remove('drag-over-top','drag-over-bottom','dragging'));
+    document.querySelectorAll('#documentsList .item-list-entry').forEach(el => el.classList.remove('drag-over-top', 'drag-over-bottom', 'dragging'));
 }
 
 async function saveChapterOrder(newOrder) {
     try {
         await api('POST', `/api/projects/${currentProjectId}/documents/reorder`, { order: newOrder });
         await loadDocuments(currentProjectId);
-    } catch(e) { console.error('saveChapterOrder:', e); }
+    } catch (e) { console.error('saveChapterOrder:', e); }
 }
 
 async function createDocument() {
@@ -393,7 +397,7 @@ async function createDocument() {
         docTitleModalInput.value = '';
         if (currentProjectId) await loadDocuments(currentProjectId);
         openDocument(doc.id);
-    } catch(e) { console.error('createDocument:', e); }
+    } catch (e) { console.error('createDocument:', e); }
     finally { btn.textContent = 'Create'; btn.disabled = false; }
 }
 
@@ -408,8 +412,8 @@ async function openDocument(id, type = 'chapter') {
         if (!checkLocalStorageRestore(`${type}_${id}`, doc.content || '')) setSaveStatus('saved');
         updateStats(); startAutoSave(); addOpenTab(id, doc.title, type);
         if (type === 'chapter' && currentProjectId) await loadDocuments(currentProjectId);
-        if (type === 'scene'   && currentProjectId) await loadScenes(currentProjectId);
-    } catch(e) { console.error('openDocument:', e); }
+        if (type === 'scene' && currentProjectId) await loadScenes(currentProjectId);
+    } catch (e) { console.error('openDocument:', e); }
 }
 
 async function saveDocument() {
@@ -424,16 +428,16 @@ async function saveDocument() {
         clearLocalStorage(`${currentDocType}_${currentDocId}`);
         updateLastSaved();
         if (currentDocType === 'chapter') await loadDocuments(currentProjectId);
-        if (currentDocType === 'scene')   await loadScenes(currentProjectId);
+        if (currentDocType === 'scene') await loadScenes(currentProjectId);
         if (navigator.onLine && currentDocType === 'chapter') {
             setSaveStatus('syncing');
             try { await api('POST', `/api/documents/${currentDocId}/sync`); setSaveStatus('synced'); setTimeout(() => setSaveStatus('saved'), 2000); }
-            catch(e) { setSaveStatus('saved'); }
+            catch (e) { setSaveStatus('saved'); }
         } else {
             setSaveStatus('saved');
             if (!navigator.onLine) pendingSync = true;
         }
-    } catch(e) { setSaveStatus('error'); console.error('saveDocument:', e); }
+    } catch (e) { setSaveStatus('error'); console.error('saveDocument:', e); }
 }
 
 async function deleteDocument(event, id) {
@@ -443,14 +447,14 @@ async function deleteDocument(event, id) {
             await api('DELETE', `/api/documents/${id}`);
             if (currentDocId === id) { currentDocId = null; hideEditor(); enableHeaderBtns(false); }
             removeOpenTab(id); await loadDocuments(currentProjectId);
-        } catch(e) { console.error('deleteDocument:', e); }
+        } catch (e) { console.error('deleteDocument:', e); }
     }, 'Delete Chapter?');
 }
 
 // --- CHARACTERS ---
 async function loadCharacters(projectId) {
     try { renderCharacters(await api('GET', `/api/projects/${projectId}/characters`)); }
-    catch(e) { console.error('loadCharacters:', e); }
+    catch (e) { console.error('loadCharacters:', e); }
 }
 
 function renderCharacters(chars) {
@@ -476,31 +480,31 @@ async function createCharacter() {
             image_url: document.getElementById('charImageInput').value.trim()
         });
         closeModal(newCharModal);
-        ['charNameInput','charAgeInput','charAppearanceInput','charPersonalityInput','charBackstoryInput','charImageInput'].forEach(id => document.getElementById(id).value = '');
+        ['charNameInput', 'charAgeInput', 'charAppearanceInput', 'charPersonalityInput', 'charBackstoryInput', 'charImageInput'].forEach(id => document.getElementById(id).value = '');
         document.getElementById('charRoleInput').value = '';
         await loadCharacters(currentProjectId);
         await loadWikiData(currentProjectId);
-    } catch(e) { console.error('createCharacter:', e); }
+    } catch (e) { console.error('createCharacter:', e); }
 }
 
 async function deleteCharacter(event, id) {
     event.stopPropagation();
     showConfirm('This character will be permanently deleted.', async () => {
         try { await api('DELETE', `/api/characters/${id}`); await loadCharacters(currentProjectId); await loadWikiData(currentProjectId); }
-        catch(e) { console.error('deleteCharacter:', e); }
+        catch (e) { console.error('deleteCharacter:', e); }
     }, 'Delete Character?');
 }
 
 async function openEditCharModal(id) {
     try {
         const c = await api('GET', `/api/characters/${id}`);
-        document.getElementById('charNameInput').value        = c.name        || '';
-        document.getElementById('charRoleInput').value        = c.role        || '';
-        document.getElementById('charAgeInput').value         = c.age         || '';
-        document.getElementById('charAppearanceInput').value  = c.appearance  || '';
+        document.getElementById('charNameInput').value = c.name || '';
+        document.getElementById('charRoleInput').value = c.role || '';
+        document.getElementById('charAgeInput').value = c.age || '';
+        document.getElementById('charAppearanceInput').value = c.appearance || '';
         document.getElementById('charPersonalityInput').value = c.personality || '';
-        document.getElementById('charBackstoryInput').value   = c.backstory   || '';
-        document.getElementById('charImageInput').value       = c.image_url   || '';
+        document.getElementById('charBackstoryInput').value = c.backstory || '';
+        document.getElementById('charImageInput').value = c.image_url || '';
         const preview = document.getElementById('charImgPreview');
         if (c.image_url) { document.getElementById('charImgPreviewEl').src = c.image_url; preview.style.display = 'block'; }
         else { preview.style.display = 'none'; }
@@ -508,7 +512,7 @@ async function openEditCharModal(id) {
         const btn = document.getElementById('confirmCharBtn');
         btn.textContent = 'Save Changes'; btn.dataset.editId = id; btn.dataset.mode = 'edit';
         openModal(newCharModal);
-    } catch(e) { console.error('openEditCharModal:', e); }
+    } catch (e) { console.error('openEditCharModal:', e); }
 }
 
 async function saveEditChar(id) {
@@ -527,7 +531,7 @@ async function saveEditChar(id) {
         });
         closeModal(newCharModal); resetCharModal();
         await loadCharacters(currentProjectId); await loadWikiData(currentProjectId);
-    } catch(e) { console.error('saveEditChar:', e); }
+    } catch (e) { console.error('saveEditChar:', e); }
     finally { btn.textContent = 'Save Changes'; btn.disabled = false; }
 }
 
@@ -535,7 +539,7 @@ function resetCharModal() {
     document.querySelector('#newCharModal .modal-title').textContent = 'New Character';
     const btn = document.getElementById('confirmCharBtn');
     btn.textContent = 'Create Character'; delete btn.dataset.editId; delete btn.dataset.mode;
-    ['charNameInput','charAgeInput','charAppearanceInput','charPersonalityInput','charBackstoryInput','charImageInput'].forEach(id => document.getElementById(id).value = '');
+    ['charNameInput', 'charAgeInput', 'charAppearanceInput', 'charPersonalityInput', 'charBackstoryInput', 'charImageInput'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('charRoleInput').value = '';
     document.getElementById('charImgPreview').style.display = 'none';
     document.getElementById('charImgPreviewEl').src = '';
@@ -545,16 +549,16 @@ function resetCharModal() {
 // --- SCENES ---
 async function loadScenes(projectId) {
     try { renderScenes(await api('GET', `/api/projects/${projectId}/scenes`)); }
-    catch(e) { console.error('loadScenes:', e); }
+    catch (e) { console.error('loadScenes:', e); }
 }
 
 function renderScenes(scenes) {
-    const moodEmoji = { tense:'⚡',romantic:'💕',mysterious:'🌫️',action:'🔥',sad:'💧',hopeful:'🌅',dark:'🌑',comedic:'😄' };
+    const moodEmoji = { tense: '⚡', romantic: '💕', mysterious: '🌫️', action: '🔥', sad: '💧', hopeful: '🌅', dark: '🌑', comedic: '😄' };
     if (!scenes.length) { scenesList.innerHTML = '<li class="empty-state">No scenes yet.</li>'; return; }
     scenesList.innerHTML = scenes.map(s => `
         <li class="item-list-entry ${s.id === currentDocId && currentDocType === 'scene' ? 'active' : ''}" onclick="openDocument(${s.id},'scene')">
             <span class="item-name">${escapeHtml(s.title)}</span>
-            ${s.mood ? `<span class="item-badge">${moodEmoji[s.mood]||''} ${s.mood}</span>` : ''}
+            ${s.mood ? `<span class="item-badge">${moodEmoji[s.mood] || ''} ${s.mood}</span>` : ''}
             <button class="item-delete" onclick="deleteScene(event,${s.id})">×</button>
         </li>`).join('');
 }
@@ -567,7 +571,7 @@ async function createScene() {
         closeModal(newSceneModal);
         document.getElementById('sceneTitleInput').value = document.getElementById('sceneMoodInput').value = '';
         await loadScenes(currentProjectId); openDocument(scene.id, 'scene');
-    } catch(e) { console.error('createScene:', e); }
+    } catch (e) { console.error('createScene:', e); }
 }
 
 async function deleteScene(event, id) {
@@ -577,23 +581,23 @@ async function deleteScene(event, id) {
             await api('DELETE', `/api/scenes/${id}`);
             if (currentDocId === id) { currentDocId = null; hideEditor(); enableHeaderBtns(false); }
             removeOpenTab(id); await loadScenes(currentProjectId);
-        } catch(e) { console.error('deleteScene:', e); }
+        } catch (e) { console.error('deleteScene:', e); }
     }, 'Delete Scene?');
 }
 
 // --- LORE ---
 async function loadLore(projectId) {
     try { renderLore(await api('GET', `/api/projects/${projectId}/lore`)); }
-    catch(e) { console.error('loadLore:', e); }
+    catch (e) { console.error('loadLore:', e); }
 }
 
 function renderLore(items) {
-    const catEmoji = { item:'⚔️',place:'🗺️',organization:'🏛️',concept:'✨',creature:'🐉',event:'📅',other:'📌' };
+    const catEmoji = { item: '⚔️', place: '🗺️', organization: '🏛️', concept: '✨', creature: '🐉', event: '📅', other: '📌' };
     if (!items.length) { loreList.innerHTML = '<li class="empty-state">No lore entries yet.</li>'; return; }
     loreList.innerHTML = items.map(i => `
         <li class="item-list-entry" onclick="openEditLoreModal(${i.id})">
             <span class="item-name">${escapeHtml(i.name)}</span>
-            <span class="item-badge">${catEmoji[i.category]||'📌'}</span>
+            <span class="item-badge">${catEmoji[i.category] || '📌'}</span>
             <button class="item-delete" onclick="deleteLore(event,${i.id})">×</button>
         </li>`).join('');
 }
@@ -608,27 +612,27 @@ async function createLore() {
             image_url: document.getElementById('loreImageInput').value.trim()
         });
         closeModal(newLoreModal);
-        ['loreNameInput','loreDescInput','loreImageInput'].forEach(id => document.getElementById(id).value = '');
+        ['loreNameInput', 'loreDescInput', 'loreImageInput'].forEach(id => document.getElementById(id).value = '');
         document.getElementById('loreCategoryInput').value = 'item';
         await loadLore(currentProjectId); await loadWikiData(currentProjectId);
-    } catch(e) { console.error('createLore:', e); }
+    } catch (e) { console.error('createLore:', e); }
 }
 
 async function deleteLore(event, id) {
     event.stopPropagation();
     showConfirm('This lore entry will be permanently deleted.', async () => {
         try { await api('DELETE', `/api/lore/${id}`); await loadLore(currentProjectId); await loadWikiData(currentProjectId); }
-        catch(e) { console.error('deleteLore:', e); }
+        catch (e) { console.error('deleteLore:', e); }
     }, 'Delete Lore Entry?');
 }
 
 async function openEditLoreModal(id) {
     try {
         const item = await api('GET', `/api/lore/${id}`);
-        document.getElementById('loreNameInput').value     = item.name        || '';
-        document.getElementById('loreCategoryInput').value = item.category    || 'item';
-        document.getElementById('loreDescInput').value     = item.description || '';
-        document.getElementById('loreImageInput').value    = item.image_url   || '';
+        document.getElementById('loreNameInput').value = item.name || '';
+        document.getElementById('loreCategoryInput').value = item.category || 'item';
+        document.getElementById('loreDescInput').value = item.description || '';
+        document.getElementById('loreImageInput').value = item.image_url || '';
         const preview = document.getElementById('loreImgPreview');
         if (item.image_url) { document.getElementById('loreImgPreviewEl').src = item.image_url; preview.style.display = 'block'; }
         else { preview.style.display = 'none'; }
@@ -636,7 +640,7 @@ async function openEditLoreModal(id) {
         const btn = document.getElementById('confirmLoreBtn');
         btn.textContent = 'Save Changes'; btn.dataset.editId = id; btn.dataset.mode = 'edit';
         openModal(newLoreModal);
-    } catch(e) { console.error('openEditLoreModal:', e); }
+    } catch (e) { console.error('openEditLoreModal:', e); }
 }
 
 async function saveEditLore(id) {
@@ -652,7 +656,7 @@ async function saveEditLore(id) {
         });
         closeModal(newLoreModal);
         await loadLore(currentProjectId); await loadWikiData(currentProjectId);
-    } catch(e) { console.error('saveEditLore:', e); }
+    } catch (e) { console.error('saveEditLore:', e); }
     finally { btn.textContent = 'Save Changes'; btn.disabled = false; resetLoreModal(); }
 }
 
@@ -660,7 +664,7 @@ function resetLoreModal() {
     document.querySelector('#newLoreModal .modal-title').textContent = 'New Lore Entry';
     const btn = document.getElementById('confirmLoreBtn');
     btn.textContent = 'Create Entry'; delete btn.dataset.editId; delete btn.dataset.mode;
-    ['loreNameInput','loreDescInput','loreImageInput'].forEach(id => document.getElementById(id).value = '');
+    ['loreNameInput', 'loreDescInput', 'loreImageInput'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('loreCategoryInput').value = 'item';
     document.getElementById('loreImgPreview').style.display = 'none';
     document.getElementById('loreImgPreviewEl').src = '';
@@ -670,7 +674,7 @@ function resetLoreModal() {
 // --- WIKI TOOLTIPS ---
 async function loadWikiData(projectId) {
     try { wikiData = await api('GET', `/api/projects/${projectId}/wiki`); }
-    catch(e) { console.error('loadWikiData:', e); }
+    catch (e) { console.error('loadWikiData:', e); }
 }
 
 function handleWikiHover(e) {
@@ -688,12 +692,12 @@ function handleWikiHover(e) {
         }
         if (!range) return;
         range.expand('word');
-    } catch(e) { return; }
+    } catch (e) { return; }
 
     const hoveredWord = range.toString().trim().toLowerCase();
     if (!hoveredWord || hoveredWord.length < 2) { hideWikiTooltip(); return; }
 
-    const paraText  = range.startContainer.textContent || '';
+    const paraText = range.startContainer.textContent || '';
     const sortedKeys = Object.keys(wikiData).sort((a, b) => b.length - a.length);
 
     for (const key of sortedKeys) {
@@ -711,18 +715,18 @@ function handleWikiHover(e) {
 function escapeRegex(str) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 function showWikiTooltip(entry, x, y) {
-    const imgEl      = document.getElementById('wikiTooltipImgEl');
-    const imgWrap    = document.getElementById('wikiCardImgWrap');
+    const imgEl = document.getElementById('wikiTooltipImgEl');
+    const imgWrap = document.getElementById('wikiCardImgWrap');
     const placeholder = document.getElementById('wikiCardPlaceholder');
-    const nameEl     = document.getElementById('wikiTooltipName');
-    const typeEl     = document.getElementById('wikiTooltipType');
-    const bodyEl     = document.getElementById('wikiCardBody');
+    const nameEl = document.getElementById('wikiTooltipName');
+    const typeEl = document.getElementById('wikiTooltipType');
+    const bodyEl = document.getElementById('wikiCardBody');
 
     nameEl.textContent = entry.name;
     if (entry.type === 'character') {
         const parts = [];
         if (entry.role) parts.push(entry.role);
-        if (entry.age)  parts.push(`Age ${entry.age}`);
+        if (entry.age) parts.push(`Age ${entry.age}`);
         typeEl.textContent = parts.join(' · ') || 'Character';
     } else {
         typeEl.textContent = entry.category || 'Lore';
@@ -738,8 +742,8 @@ function showWikiTooltip(entry, x, y) {
 
     let bodyHtml = '';
     if (entry.type === 'character') {
-        if (entry.summary)    bodyHtml += `<div class="wiki-card-field"><div class="wiki-card-field-label">Personality</div><div class="wiki-card-field-value">${escapeHtml(entry.summary)}</div></div>`;
-        if (entry.backstory)  bodyHtml += `<div class="wiki-card-field"><div class="wiki-card-field-label">Backstory</div><div class="wiki-card-field-value">${escapeHtml(entry.backstory)}</div></div>`;
+        if (entry.summary) bodyHtml += `<div class="wiki-card-field"><div class="wiki-card-field-label">Personality</div><div class="wiki-card-field-value">${escapeHtml(entry.summary)}</div></div>`;
+        if (entry.backstory) bodyHtml += `<div class="wiki-card-field"><div class="wiki-card-field-label">Backstory</div><div class="wiki-card-field-value">${escapeHtml(entry.backstory)}</div></div>`;
         if (entry.appearance) bodyHtml += `<div class="wiki-card-field"><div class="wiki-card-field-label">Appearance</div><div class="wiki-card-field-value">${escapeHtml(entry.appearance)}</div></div>`;
     } else if (entry.summary) {
         bodyHtml = `<div class="wiki-card-field"><div class="wiki-card-field-value">${escapeHtml(entry.summary)}</div></div>`;
@@ -748,11 +752,11 @@ function showWikiTooltip(entry, x, y) {
 
     const cW = 340, cH = 400;
     let left = x + 20, top = y - 60;
-    if (left + cW > window.innerWidth  - 20) left = x - cW - 20;
-    if (top  + cH > window.innerHeight - 20) top  = window.innerHeight - cH - 20;
+    if (left + cW > window.innerWidth - 20) left = x - cW - 20;
+    if (top + cH > window.innerHeight - 20) top = window.innerHeight - cH - 20;
     if (top < 10) top = 10;
     wikiTooltip.style.left = `${left}px`;
-    wikiTooltip.style.top  = `${top}px`;
+    wikiTooltip.style.top = `${top}px`;
     wikiTooltip.style.display = 'block';
 }
 
@@ -760,14 +764,14 @@ function hideWikiTooltip() { wikiTooltip.style.display = 'none'; }
 
 // --- NOTES PANEL ---
 let notesAutoSaveTimer = null;
-let notesPanelOpen     = false;
+let notesPanelOpen = false;
 
 async function loadNotes(projectId) {
     try {
         const note = await api('GET', `/api/projects/${projectId}/notes`);
         document.getElementById('notesTextarea').value = note.content || '';
         setNotesSaveStatus('');
-    } catch(e) { console.error('loadNotes:', e); }
+    } catch (e) { console.error('loadNotes:', e); }
 }
 
 async function saveNotes() {
@@ -777,7 +781,7 @@ async function saveNotes() {
         await api('PUT', `/api/projects/${currentProjectId}/notes`, { content: document.getElementById('notesTextarea').value });
         setNotesSaveStatus('Saved ✓');
         setTimeout(() => setNotesSaveStatus(''), 2000);
-    } catch(e) { setNotesSaveStatus('Error'); console.error('saveNotes:', e); }
+    } catch (e) { setNotesSaveStatus('Error'); console.error('saveNotes:', e); }
 }
 
 function setNotesSaveStatus(msg) { const el = document.getElementById('notesSaveStatus'); if (el) el.textContent = msg; }
@@ -871,7 +875,7 @@ async function performSearch(query) {
     try {
         searchResults = await api('GET', `/api/projects/${currentProjectId}/search?q=${encodeURIComponent(query)}`);
         renderSearchResults(query);
-    } catch(e) { console.error('search:', e); }
+    } catch (e) { console.error('search:', e); }
 }
 
 function renderSearchResults(query) {
@@ -880,9 +884,9 @@ function renderSearchResults(query) {
         container.innerHTML = `<div class="search-empty">No results for "<strong>${escapeHtml(query)}</strong>"</div>`;
         return;
     }
-    const groups = { chapter:[], scene:[], character:[], lore:[] };
+    const groups = { chapter: [], scene: [], character: [], lore: [] };
     searchResults.forEach(r => { if (groups[r.type]) groups[r.type].push(r); });
-    const labels = { chapter:'📄 Chapters', scene:'⚡ Scenes', character:'👤 Characters', lore:'📖 Lore' };
+    const labels = { chapter: '📄 Chapters', scene: '⚡ Scenes', character: '👤 Characters', lore: '📖 Lore' };
     let html = '', idx = 0;
     for (const [type, items] of Object.entries(groups)) {
         if (!items.length) continue;
@@ -910,16 +914,16 @@ function highlightMatch(text, query) {
 
 function openSearchResult(idx) {
     const flat = [];
-    const groups = { chapter:[], scene:[], character:[], lore:[] };
+    const groups = { chapter: [], scene: [], character: [], lore: [] };
     searchResults.forEach(r => { if (groups[r.type]) groups[r.type].push(r); });
     Object.values(groups).forEach(items => items.forEach(i => flat.push(i)));
     const result = flat[idx];
     if (!result) return;
     closeSearch();
-    if      (result.type === 'chapter')   { switchTab('chapters');   openDocument(result.id, 'chapter'); }
-    else if (result.type === 'scene')     { switchTab('scenes');     openDocument(result.id, 'scene'); }
+    if (result.type === 'chapter') { switchTab('chapters'); openDocument(result.id, 'chapter'); }
+    else if (result.type === 'scene') { switchTab('scenes'); openDocument(result.id, 'scene'); }
     else if (result.type === 'character') { switchTab('characters'); openEditCharModal(result.id); }
-    else if (result.type === 'lore')      { switchTab('lore');       openEditLoreModal(result.id); }
+    else if (result.type === 'lore') { switchTab('lore'); openEditLoreModal(result.id); }
 }
 
 function navigateSearch(direction) {
@@ -937,7 +941,7 @@ document.getElementById('searchInput').addEventListener('input', e => {
 });
 document.getElementById('searchInput').addEventListener('keydown', e => {
     if (e.key === 'ArrowDown') { e.preventDefault(); navigateSearch(1); }
-    if (e.key === 'ArrowUp')   { e.preventDefault(); navigateSearch(-1); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); navigateSearch(-1); }
     if (e.key === 'Enter') { openSearchResult(searchSelectedIndex >= 0 ? searchSelectedIndex : 0); }
     if (e.key === 'Escape') closeSearch();
 });
@@ -950,23 +954,23 @@ let relSelectedColor = '#7b6fb0';
 let relNodes = [], relEdges = [];
 let relDragging = null, relDragOffX = 0, relDragOffY = 0;
 let relZoom = 1, relPanX = 0, relPanY = 0;
-let relIsPanning = false, relPanStart = { x:0, y:0 };
+let relIsPanning = false, relPanStart = { x: 0, y: 0 };
 let relCanvas = null, relCtx = null;
 
 async function loadRelationships(projectId) {
     try { renderRelationshipsList(await api('GET', `/api/projects/${projectId}/relationships`)); }
-    catch(e) { console.error('loadRelationships:', e); }
+    catch (e) { console.error('loadRelationships:', e); }
 }
 
 function renderRelationshipsList(rels) {
-    const emoji = { allies:'🤝',rivals:'⚔️',lovers:'💕',enemies:'🖤',family:'👨‍👩‍👧',mentor:'🧭',friends:'😊',complicated:'🌀',strangers:'👥' };
+    const emoji = { allies: '🤝', rivals: '⚔️', lovers: '💕', enemies: '🖤', family: '👨‍👩‍👧', mentor: '🧭', friends: '😊', complicated: '🌀', strangers: '👥' };
     if (!rels.length) { relationshipsList.innerHTML = '<li class="empty-state">No relationships yet.</li>'; return; }
     relationshipsList.innerHTML = rels.map(r => `
         <li class="item-list-entry">
             <span class="item-name" style="display:flex;align-items:center;gap:6px;">
                 <span style="width:8px;height:8px;border-radius:50%;background:${r.color};flex-shrink:0;display:inline-block;"></span>
                 ${escapeHtml(r.char_a_name)}
-                <span style="color:var(--text-muted);font-size:11px;">${emoji[r.relation_type]||'↔'} ${r.relation_type}</span>
+                <span style="color:var(--text-muted);font-size:11px;">${emoji[r.relation_type] || '↔'} ${r.relation_type}</span>
                 ${escapeHtml(r.char_b_name)}
             </span>
             <button class="item-delete" onclick="deleteRelationship(event,${r.id})">×</button>
@@ -984,7 +988,7 @@ async function openNewRelModal() {
         relSelectedColor = '#7b6fb0';
         document.querySelectorAll('#relColorPicker .rel-color-opt').forEach(o => o.classList.toggle('selected', o.dataset.color === relSelectedColor));
         openModal(newRelModal);
-    } catch(e) { console.error('openNewRelModal:', e); }
+    } catch (e) { console.error('openNewRelModal:', e); }
 }
 
 async function createRelationship() {
@@ -1003,7 +1007,7 @@ async function createRelationship() {
         closeModal(newRelModal);
         document.getElementById('relDescInput').value = '';
         await loadRelationships(currentProjectId);
-    } catch(e) { console.error('createRelationship:', e); }
+    } catch (e) { console.error('createRelationship:', e); }
     finally { btn.textContent = 'Add Relationship'; btn.disabled = false; }
 }
 
@@ -1014,7 +1018,7 @@ async function deleteRelationship(event, id) {
             await api('DELETE', `/api/relationships/${id}`);
             await loadRelationships(currentProjectId);
             if (document.getElementById('relWebOverlay').style.display !== 'none') await openRelWeb();
-        } catch(e) { console.error('deleteRelationship:', e); }
+        } catch (e) { console.error('deleteRelationship:', e); }
     }, 'Remove Relationship?');
 }
 
@@ -1024,7 +1028,7 @@ function openEditRelModal(edge) {
     editingRelId = edge.id; editRelColor = edge.color || '#7b6fb0';
     document.getElementById('editRelCharNames').textContent = `${edge.char_a_name}  ↔  ${edge.char_b_name}`;
     document.getElementById('editRelTypeInput').value = edge.relation_type || 'allies';
-    document.getElementById('editRelDescInput').value = edge.description   || '';
+    document.getElementById('editRelDescInput').value = edge.description || '';
     document.querySelectorAll('#editRelColorPicker .rel-color-opt').forEach(o => o.classList.toggle('selected', o.dataset.color === editRelColor));
     openModal(document.getElementById('editRelModal'));
 }
@@ -1041,7 +1045,7 @@ async function saveEditRel() {
         });
         closeModal(document.getElementById('editRelModal'));
         await loadRelationships(currentProjectId); await openRelWeb();
-    } catch(e) { console.error('saveEditRel:', e); }
+    } catch (e) { console.error('saveEditRel:', e); }
     finally { btn.textContent = 'Save Changes'; btn.disabled = false; }
 }
 
@@ -1049,7 +1053,7 @@ async function deleteRelFromEdit() {
     const id = editingRelId;
     closeModal(document.getElementById('editRelModal'));
     try { await api('DELETE', `/api/relationships/${id}`); await loadRelationships(currentProjectId); await openRelWeb(); }
-    catch(e) { console.error('deleteRelFromEdit:', e); }
+    catch (e) { console.error('deleteRelFromEdit:', e); }
 }
 
 async function openRelWeb() {
@@ -1062,7 +1066,7 @@ async function openRelWeb() {
         document.getElementById('relWebProjectName').textContent = (currentProjectData?.title || '') + ' — Character Web';
         document.getElementById('relWebOverlay').style.display = 'flex';
         relCanvas = document.getElementById('relWebCanvas');
-        relCtx    = relCanvas.getContext('2d');
+        relCtx = relCanvas.getContext('2d');
         await new Promise(r => setTimeout(r, 50));
         const dpr = window.devicePixelRatio || 1;
         const cssW = relCanvas.offsetWidth, cssH = relCanvas.offsetHeight;
@@ -1073,7 +1077,7 @@ async function openRelWeb() {
         const cx = cssW / 2, cy = cssH / 2, radius = Math.min(cx, cy) * 0.55;
         relNodes = chars.map((c, i) => {
             const angle = (2 * Math.PI * i) / chars.length - Math.PI / 2;
-            return { id:c.id, name:c.name, role:c.role||'', image_url:c.image_url||'', x:cx+radius*Math.cos(angle), y:cy+radius*Math.sin(angle), img:null };
+            return { id: c.id, name: c.name, role: c.role || '', image_url: c.image_url || '', x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle), img: null };
         });
         relEdges = rels;
         relNodes.forEach(node => {
@@ -1083,21 +1087,21 @@ async function openRelWeb() {
             }
         });
         drawRelWeb(); setupRelCanvasEvents();
-    } catch(e) { console.error('openRelWeb:', e); }
+    } catch (e) { console.error('openRelWeb:', e); }
 }
 
-function relZoomIn()    { relZoom = Math.min(relZoom * 1.2, 4); drawRelWeb(); }
-function relZoomOut()   { relZoom = Math.max(relZoom * 0.8, 0.2); drawRelWeb(); }
+function relZoomIn() { relZoom = Math.min(relZoom * 1.2, 4); drawRelWeb(); }
+function relZoomOut() { relZoom = Math.max(relZoom * 0.8, 0.2); drawRelWeb(); }
 function relZoomReset() { relZoom = 1; relPanX = 0; relPanY = 0; drawRelWeb(); }
 
 function drawRelWeb() {
     if (!relCtx || !relCanvas) return;
     const ctx = relCtx;
-    const W   = relCanvas._cssW || relCanvas.offsetWidth;
-    const H   = relCanvas._cssH || relCanvas.offsetHeight;
-    const style      = getComputedStyle(document.documentElement);
+    const W = relCanvas._cssW || relCanvas.offsetWidth;
+    const H = relCanvas._cssH || relCanvas.offsetHeight;
+    const style = getComputedStyle(document.documentElement);
     const textPrimary = style.getPropertyValue('--text-primary').trim() || '#f0eeff';
-    const bgModal     = style.getPropertyValue('--bg-modal').trim()     || '#181a2e';
+    const bgModal = style.getPropertyValue('--bg-modal').trim() || '#181a2e';
 
     ctx.clearRect(0, 0, W, H);
     ctx.save();
@@ -1110,21 +1114,21 @@ function drawRelWeb() {
         pairCount[key] = (pairCount[key] || 0) + 1;
     });
 
-    const relTypeEmoji = { allies:'🤝',rivals:'⚔️',lovers:'💕',enemies:'🖤',family:'👨‍👩‍👧',mentor:'🧭',friends:'😊',complicated:'🌀',strangers:'👥' };
+    const relTypeEmoji = { allies: '🤝', rivals: '⚔️', lovers: '💕', enemies: '🖤', family: '👨‍👩‍👧', mentor: '🧭', friends: '😊', complicated: '🌀', strangers: '👥' };
 
     relEdges.forEach(edge => {
         const nodeA = relNodes.find(n => n.id === edge.char_a_id);
         const nodeB = relNodes.find(n => n.id === edge.char_b_id);
         if (!nodeA || !nodeB) return;
-        const key   = [Math.min(edge.char_a_id, edge.char_b_id), Math.max(edge.char_a_id, edge.char_b_id)].join('-');
+        const key = [Math.min(edge.char_a_id, edge.char_b_id), Math.max(edge.char_a_id, edge.char_b_id)].join('-');
         const total = pairCount[key] || 1;
         pairIndex[key] = pairIndex[key] || 0;
         const idx = pairIndex[key]++;
         const dx = nodeB.x - nodeA.x, dy = nodeB.y - nodeA.y;
         const len = Math.hypot(dx, dy) || 1;
-        const offset = total === 1 ? 0 : (idx - (total-1)/2) * 55;
-        const cpX = (nodeA.x + nodeB.x)/2 + (-dy/len) * offset;
-        const cpY = (nodeA.y + nodeB.y)/2 + ( dx/len) * offset;
+        const offset = total === 1 ? 0 : (idx - (total - 1) / 2) * 55;
+        const cpX = (nodeA.x + nodeB.x) / 2 + (-dy / len) * offset;
+        const cpY = (nodeA.y + nodeB.y) / 2 + (dx / len) * offset;
         edge._cpX = cpX; edge._cpY = cpY;
         edge._ax = nodeA.x; edge._ay = nodeA.y;
         edge._bx = nodeB.x; edge._by = nodeB.y;
@@ -1133,43 +1137,43 @@ function drawRelWeb() {
         ctx.quadraticCurveTo(cpX, cpY, nodeB.x, nodeB.y);
         ctx.strokeStyle = edge.color || '#7b6fb0'; ctx.lineWidth = 2.5; ctx.globalAlpha = 0.8; ctx.stroke(); ctx.globalAlpha = 1;
 
-        const lx = 0.25*nodeA.x + 0.5*cpX + 0.25*nodeB.x;
-        const ly = 0.25*nodeA.y + 0.5*cpY + 0.25*nodeB.y;
+        const lx = 0.25 * nodeA.x + 0.5 * cpX + 0.25 * nodeB.x;
+        const ly = 0.25 * nodeA.y + 0.5 * cpY + 0.25 * nodeB.y;
         ctx.font = '13px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillStyle = bgModal; ctx.beginPath(); ctx.roundRect(lx-15, ly-11, 30, 22, 6); ctx.fill();
+        ctx.fillStyle = bgModal; ctx.beginPath(); ctx.roundRect(lx - 15, ly - 11, 30, 22, 6); ctx.fill();
         ctx.strokeStyle = edge.color || '#7b6fb0'; ctx.lineWidth = 1; ctx.stroke();
         ctx.fillText(relTypeEmoji[edge.relation_type] || edge.relation_type, lx, ly);
     });
 
     const nr = 38;
     relNodes.forEach(node => {
-        ctx.save(); ctx.beginPath(); ctx.arc(node.x, node.y, nr, 0, Math.PI*2); ctx.clip();
+        ctx.save(); ctx.beginPath(); ctx.arc(node.x, node.y, nr, 0, Math.PI * 2); ctx.clip();
         if (node.img && node.img.complete && node.img.naturalWidth > 0) {
-            ctx.drawImage(node.img, node.x-nr, node.y-nr, nr*2, nr*2);
+            ctx.drawImage(node.img, node.x - nr, node.y - nr, nr * 2, nr * 2);
         } else {
-            const grad = ctx.createRadialGradient(node.x, node.y-nr*0.3, 0, node.x, node.y, nr);
+            const grad = ctx.createRadialGradient(node.x, node.y - nr * 0.3, 0, node.x, node.y, nr);
             grad.addColorStop(0, '#5b7fb0'); grad.addColorStop(1, '#7b6fb0');
-            ctx.fillStyle = grad; ctx.fillRect(node.x-nr, node.y-nr, nr*2, nr*2);
+            ctx.fillStyle = grad; ctx.fillRect(node.x - nr, node.y - nr, nr * 2, nr * 2);
             ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.font = 'bold 22px serif';
             ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
             ctx.fillText(node.name.charAt(0).toUpperCase(), node.x, node.y);
         }
         ctx.restore();
-        ctx.beginPath(); ctx.arc(node.x, node.y, nr, 0, Math.PI*2);
+        ctx.beginPath(); ctx.arc(node.x, node.y, nr, 0, Math.PI * 2);
         ctx.strokeStyle = '#7b6fb0'; ctx.lineWidth = 2.5; ctx.stroke();
 
         ctx.font = `600 13px 'DM Sans', sans-serif`;
         const nameW = ctx.measureText(node.name).width + 16, nameH = 22;
-        const nameX = node.x - nameW/2, nameY = node.y + nr + 6;
+        const nameX = node.x - nameW / 2, nameY = node.y + nr + 6;
         ctx.fillStyle = bgModal; ctx.beginPath(); ctx.roundRect(nameX, nameY, nameW, nameH, 6); ctx.fill();
         ctx.fillStyle = textPrimary; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(node.name, node.x, nameY + nameH/2);
+        ctx.fillText(node.name, node.x, nameY + nameH / 2);
 
         if (node.role) {
             ctx.font = `11px 'DM Sans', sans-serif`;
             const rW = ctx.measureText(node.role).width + 12, rY = nameY + nameH + 3;
-            ctx.fillStyle = 'rgba(157,143,212,0.15)'; ctx.beginPath(); ctx.roundRect(node.x-rW/2, rY, rW, 18, 5); ctx.fill();
-            ctx.fillStyle = '#9d8fd4'; ctx.textBaseline = 'middle'; ctx.fillText(node.role, node.x, rY+9);
+            ctx.fillStyle = 'rgba(157,143,212,0.15)'; ctx.beginPath(); ctx.roundRect(node.x - rW / 2, rY, rW, 18, 5); ctx.fill();
+            ctx.fillStyle = '#9d8fd4'; ctx.textBaseline = 'middle'; ctx.fillText(node.role, node.x, rY + 9);
         }
     });
     ctx.restore();
@@ -1191,11 +1195,11 @@ function setupRelCanvasEvents() {
     relCanvas.onmousedown = (e) => {
         const rect = relCanvas.getBoundingClientRect();
         const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-        mouseDownPos = { x:mx, y:my }; mouseDownTime = Date.now();
+        mouseDownPos = { x: mx, y: my }; mouseDownTime = Date.now();
         const cx = (mx - relPanX) / relZoom, cy = (my - relPanY) / relZoom;
-        relDragging = relNodes.find(n => Math.hypot(n.x-cx, n.y-cy) < 42);
+        relDragging = relNodes.find(n => Math.hypot(n.x - cx, n.y - cy) < 42);
         if (relDragging) { relDragOffX = relDragging.x - cx; relDragOffY = relDragging.y - cy; }
-        else { relIsPanning = true; relPanStart = { x:mx-relPanX, y:my-relPanY }; relCanvas.style.cursor = 'grabbing'; }
+        else { relIsPanning = true; relPanStart = { x: mx - relPanX, y: my - relPanY }; relCanvas.style.cursor = 'grabbing'; }
     };
 
     relCanvas.onmousemove = (e) => {
@@ -1228,7 +1232,7 @@ function setupRelCanvasEvents() {
     window.addEventListener('resize', () => {
         if (document.getElementById('relWebOverlay').style.display !== 'none') {
             const dpr = window.devicePixelRatio || 1;
-            relCanvas.width  = relCanvas.offsetWidth  * dpr;
+            relCanvas.width = relCanvas.offsetWidth * dpr;
             relCanvas.height = relCanvas.offsetHeight * dpr;
             relCanvas._dpr = dpr; relCanvas._cssW = relCanvas.offsetWidth; relCanvas._cssH = relCanvas.offsetHeight;
             relCtx.scale(dpr, dpr); drawRelWeb();
@@ -1239,9 +1243,9 @@ function setupRelCanvasEvents() {
 function isNearCurve(mx, my, edge) {
     if (edge._ax === undefined) return false;
     for (let t = 0; t <= 1; t += 0.05) {
-        const bx = (1-t)*(1-t)*edge._ax + 2*(1-t)*t*edge._cpX + t*t*edge._bx;
-        const by = (1-t)*(1-t)*edge._ay + 2*(1-t)*t*edge._cpY + t*t*edge._by;
-        if (Math.hypot(mx-bx, my-by) < 10) return true;
+        const bx = (1 - t) * (1 - t) * edge._ax + 2 * (1 - t) * t * edge._cpX + t * t * edge._bx;
+        const by = (1 - t) * (1 - t) * edge._ay + 2 * (1 - t) * t * edge._cpY + t * t * edge._by;
+        if (Math.hypot(mx - bx, my - by) < 10) return true;
     }
     return false;
 }
@@ -1269,11 +1273,11 @@ function updateTabTitle(id, title) {
 }
 
 function renderTabs() {
-    const icon = { chapter:'📄', scene:'⚡' };
+    const icon = { chapter: '📄', scene: '⚡' };
     openTabsEl.innerHTML = openTabs.map(t => `
         <div class="open-tab ${t.id === currentDocId && t.type === currentDocType ? 'active' : ''}"
              data-id="${t.id}" data-type="${t.type}" onclick="openDocument(${t.id},'${t.type}')">
-            <span style="font-size:11px;margin-right:4px;">${icon[t.type]||'📄'}</span>
+            <span style="font-size:11px;margin-right:4px;">${icon[t.type] || '📄'}</span>
             <span class="open-tab-name">${escapeHtml(t.title)}</span>
             <button class="open-tab-close" onclick="closeTab(event,${t.id},'${t.type}')">×</button>
         </div>`).join('');
@@ -1284,27 +1288,27 @@ function closeTab(event, id, type) {
     openTabs = openTabs.filter(t => !(t.id === id && t.type === type));
     renderTabs();
     if (currentDocId === id && currentDocType === type) {
-        if (openTabs.length) { const last = openTabs[openTabs.length-1]; openDocument(last.id, last.type); }
+        if (openTabs.length) { const last = openTabs[openTabs.length - 1]; openDocument(last.id, last.type); }
         else { currentDocId = null; hideEditor(); tabsBar.style.display = 'none'; }
     }
     if (!openTabs.length) tabsBar.style.display = 'none';
 }
 
 // --- AUTO-SAVE & LOCALSTORAGE ---
-function getLocalKey(key)  { return `scripvia_doc_${key}`; }
+function getLocalKey(key) { return `scripvia_doc_${key}`; }
 
 function saveToLocalStorage() {
     if (!currentDocId || !quill) return;
     try { localStorage.setItem(getLocalKey(`${currentDocType}_${currentDocId}`), JSON.stringify({ title: docTitleInput.value, content: quill.root.innerHTML, savedAt: Date.now() })); }
-    catch(e) {}
+    catch (e) { }
 }
 
 function loadFromLocalStorage(key) {
     try { const raw = localStorage.getItem(getLocalKey(key)); return raw ? JSON.parse(raw) : null; }
-    catch(e) { return null; }
+    catch (e) { return null; }
 }
 
-function clearLocalStorage(key) { try { localStorage.removeItem(getLocalKey(key)); } catch(e) {} }
+function clearLocalStorage(key) { try { localStorage.removeItem(getLocalKey(key)); } catch (e) { } }
 
 function checkLocalStorageRestore(key, serverContent) {
     const backup = loadFromLocalStorage(key);
@@ -1321,8 +1325,8 @@ function checkLocalStorageRestore(key, serverContent) {
 
 function formatTimeAgo(ts) {
     const d = Math.floor((Date.now() - ts) / 1000);
-    if (d < 60) return `${d}s ago`; if (d < 3600) return `${Math.floor(d/60)}m ago`;
-    return `${Math.floor(d/3600)}h ago`;
+    if (d < 60) return `${d}s ago`; if (d < 3600) return `${Math.floor(d / 60)}m ago`;
+    return `${Math.floor(d / 3600)}h ago`;
 }
 
 function startAutoSave() {
@@ -1338,7 +1342,7 @@ function startAutoSave() {
 }
 
 function stopAutoSave() {
-    if (autoSaveTimer)  { clearInterval(autoSaveTimer);  autoSaveTimer  = null; }
+    if (autoSaveTimer) { clearInterval(autoSaveTimer); autoSaveTimer = null; }
     if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
     secondsUntilSave = 30;
 }
@@ -1349,24 +1353,24 @@ function resetCountdown() { secondsUntilSave = 30; }
 window.addEventListener('online', async () => {
     if (pendingSync && currentDocId && currentDocType === 'chapter') {
         setSaveStatus('syncing');
-        try { await saveDocument(); pendingSync = false; } catch(e) {}
+        try { await saveDocument(); pendingSync = false; } catch (e) { }
     }
 });
 
 // --- STATS ---
 function updateStats() {
     if (!quill) return;
-    const text  = quill.getText().trim();
+    const text = quill.getText().trim();
     const words = text ? text.split(/\s+/).filter(w => w.length > 0) : [];
     if (wordCountEl) wordCountEl.textContent = `${words.length.toLocaleString()} word${words.length !== 1 ? 's' : ''}`;
     if (charCountEl) charCountEl.textContent = `${text.length.toLocaleString()} char${text.length !== 1 ? 's' : ''}`;
-    if (readTimeEl)  readTimeEl.textContent  = `~${Math.max(1, Math.ceil(words.length/200))} min read`;
+    if (readTimeEl) readTimeEl.textContent = `~${Math.max(1, Math.ceil(words.length / 200))} min read`;
     updateFocusWordCount();
 }
 
 function updateLastSaved() {
     if (!lastSavedTimeEl) return;
-    lastSavedTimeEl.textContent = `Saved at ${new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}`;
+    lastSavedTimeEl.textContent = `Saved at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 }
 
 // --- UI HELPERS ---
@@ -1389,32 +1393,32 @@ function hideEditor() {
     docTitleInput.value = ''; docTitleInput.disabled = true;
     if (quill) quill.root.innerHTML = '';
     setSaveStatus('');
-    if (wordCountEl)     wordCountEl.textContent     = '0 words';
-    if (charCountEl)     charCountEl.textContent     = '0 chars';
-    if (readTimeEl)      readTimeEl.textContent      = '~0 min read';
+    if (wordCountEl) wordCountEl.textContent = '0 words';
+    if (charCountEl) charCountEl.textContent = '0 chars';
+    if (readTimeEl) readTimeEl.textContent = '~0 min read';
     if (lastSavedTimeEl) lastSavedTimeEl.textContent = 'Never saved';
     document.getElementById('notesToggleBtn').style.display = 'none';
-    document.getElementById('focusModeBtn').style.display   = 'none';
-    document.getElementById('searchBtn').style.display      = 'none';
+    document.getElementById('focusModeBtn').style.display = 'none';
+    document.getElementById('searchBtn').style.display = 'none';
     closeNotesPanel(); closeSearch();
     if (isFocusMode) exitFocusMode();
 }
 
 function setSaveStatus(status) {
-    const map = { saved:'✓ Saved', saving:'Saving...', syncing:'↑ Syncing...', synced:'✓ Synced', unsaved:'● Unsaved', error:'✗ Error', '':'' };
+    const map = { saved: '✓ Saved', saving: 'Saving...', syncing: '↑ Syncing...', synced: '✓ Synced', unsaved: '● Unsaved', error: '✗ Error', '': '' };
     saveStatus.textContent = map[status] ?? status;
-    saveStatus.className   = 'save-status ' + status;
+    saveStatus.className = 'save-status ' + status;
 }
 
 function enableHeaderBtns(on) { saveBtn.disabled = exportPdfBtn.disabled = exportDocxBtn.disabled = !on; }
 
 function escapeHtml(str) {
     if (!str) return '';
-    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // --- MODALS ---
-function openModal(modal)  { modal.classList.add('active'); }
+function openModal(modal) { modal.classList.add('active'); }
 function closeModal(modal) { modal.classList.remove('active'); }
 
 document.querySelectorAll('.modal-overlay').forEach(o => {
@@ -1430,7 +1434,7 @@ let isDark = localStorage.getItem('scripvia_theme') !== 'light';
 
 function applyTheme() {
     document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
-    document.getElementById('themeIcon').textContent  = isDark ? '🌙' : '☀️';
+    document.getElementById('themeIcon').textContent = isDark ? '🌙' : '☀️';
     document.getElementById('themeLabel').textContent = isDark ? 'Dark' : 'Light';
     localStorage.setItem('scripvia_theme', isDark ? 'dark' : 'light');
 }
@@ -1461,7 +1465,7 @@ document.addEventListener('keydown', e => {
 });
 
 // --- EXPORT ---
-exportPdfBtn.addEventListener('click',  () => { if (currentDocId && currentDocType === 'chapter') window.location.href = `/api/documents/${currentDocId}/export/pdf`; });
+exportPdfBtn.addEventListener('click', () => { if (currentDocId && currentDocType === 'chapter') window.location.href = `/api/documents/${currentDocId}/export/pdf`; });
 exportDocxBtn.addEventListener('click', () => { if (currentDocId && currentDocType === 'chapter') window.location.href = `/api/documents/${currentDocId}/export/docx`; });
 
 // --- AUTH ---
@@ -1479,7 +1483,7 @@ async function checkAuthState() {
             if (guest) showGuestUser(JSON.parse(guest).name);
             else { loginBtn.style.display = 'flex'; userInfo.classList.add('hidden'); }
         }
-    } catch(e) { console.error('checkAuthState:', e); }
+    } catch (e) { console.error('checkAuthState:', e); }
 }
 
 function showGuestUser(name) {
@@ -1490,33 +1494,33 @@ function showGuestUser(name) {
 }
 
 // --- EVENT LISTENERS ---
-document.getElementById('newProjectBtn').addEventListener('click',    () => openModal(newProjectModal));
+document.getElementById('newProjectBtn').addEventListener('click', () => openModal(newProjectModal));
 document.getElementById('cancelProjectBtn').addEventListener('click', () => closeModal(newProjectModal));
-document.getElementById('cancelProjectBtn2').addEventListener('click',() => closeModal(newProjectModal));
+document.getElementById('cancelProjectBtn2').addEventListener('click', () => closeModal(newProjectModal));
 document.getElementById('confirmProjectBtn').addEventListener('click', createProject);
 projectTitleInput.addEventListener('keydown', e => { if (e.key === 'Enter') createProject(); });
 
-document.getElementById('newDocBtn').addEventListener('click',    () => openModal(newDocModal));
-document.getElementById('cancelDocBtn').addEventListener('click',  () => closeModal(newDocModal));
+document.getElementById('newDocBtn').addEventListener('click', () => openModal(newDocModal));
+document.getElementById('cancelDocBtn').addEventListener('click', () => closeModal(newDocModal));
 document.getElementById('cancelDocBtnX').addEventListener('click', () => closeModal(newDocModal));
 document.getElementById('confirmDocBtn').addEventListener('click', createDocument);
 docTitleModalInput.addEventListener('keydown', e => { if (e.key === 'Enter') createDocument(); });
 
-document.getElementById('newCharBtn').addEventListener('click',    () => openModal(newCharModal));
-document.getElementById('cancelCharBtn').addEventListener('click',  () => { resetCharModal(); closeModal(newCharModal); });
+document.getElementById('newCharBtn').addEventListener('click', () => openModal(newCharModal));
+document.getElementById('cancelCharBtn').addEventListener('click', () => { resetCharModal(); closeModal(newCharModal); });
 document.getElementById('cancelCharBtnX').addEventListener('click', () => { resetCharModal(); closeModal(newCharModal); });
 document.getElementById('confirmCharBtn').addEventListener('click', () => {
     const btn = document.getElementById('confirmCharBtn');
     btn.dataset.mode === 'edit' && btn.dataset.editId ? saveEditChar(parseInt(btn.dataset.editId)) : createCharacter();
 });
 
-document.getElementById('newSceneBtn').addEventListener('click',    () => openModal(newSceneModal));
-document.getElementById('cancelSceneBtn').addEventListener('click',  () => closeModal(newSceneModal));
+document.getElementById('newSceneBtn').addEventListener('click', () => openModal(newSceneModal));
+document.getElementById('cancelSceneBtn').addEventListener('click', () => closeModal(newSceneModal));
 document.getElementById('cancelSceneBtnX').addEventListener('click', () => closeModal(newSceneModal));
 document.getElementById('confirmSceneBtn').addEventListener('click', createScene);
 
-document.getElementById('newLoreBtn').addEventListener('click',    () => openModal(newLoreModal));
-document.getElementById('cancelLoreBtn').addEventListener('click',  () => { resetLoreModal(); closeModal(newLoreModal); });
+document.getElementById('newLoreBtn').addEventListener('click', () => openModal(newLoreModal));
+document.getElementById('cancelLoreBtn').addEventListener('click', () => { resetLoreModal(); closeModal(newLoreModal); });
 document.getElementById('cancelLoreBtnX').addEventListener('click', () => { resetLoreModal(); closeModal(newLoreModal); });
 document.getElementById('confirmLoreBtn').addEventListener('click', () => {
     const btn = document.getElementById('confirmLoreBtn');
@@ -1527,8 +1531,8 @@ saveBtn.addEventListener('click', saveDocument);
 
 // --- INIT ---
 document.addEventListener('DOMContentLoaded', () => {
-    setupImageUpload('charImageFile','charImageInput','charImgPreview','charImgPreviewEl','clearCharImg');
-    setupImageUpload('loreImageFile','loreImageInput','loreImgPreview','loreImgPreviewEl','clearLoreImg');
+    setupImageUpload('charImageFile', 'charImageInput', 'charImgPreview', 'charImgPreviewEl', 'clearCharImg');
+    setupImageUpload('loreImageFile', 'loreImageInput', 'loreImgPreview', 'loreImgPreviewEl', 'clearLoreImg');
 
     document.getElementById('wikiCardClose').addEventListener('click', hideWikiTooltip);
     document.getElementById('backToOverview').addEventListener('click', () => { hideEditor(); showProjectOverview(currentProjectId); });
@@ -1540,11 +1544,11 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('viewRelWebBtn').addEventListener('click', openRelWeb);
     document.getElementById('relWebClose').addEventListener('click', closeRelWeb);
     document.getElementById('relWebAddBtn').addEventListener('click', () => { closeRelWeb(); openNewRelModal(); });
-    document.getElementById('cancelRelBtn').addEventListener('click',  () => closeModal(newRelModal));
+    document.getElementById('cancelRelBtn').addEventListener('click', () => closeModal(newRelModal));
     document.getElementById('cancelRelBtnX').addEventListener('click', () => closeModal(newRelModal));
     document.getElementById('confirmRelBtn').addEventListener('click', createRelationship);
     document.getElementById('confirmEditRelBtn').addEventListener('click', saveEditRel);
-    document.getElementById('cancelEditRelBtn').addEventListener('click',  () => closeModal(document.getElementById('editRelModal')));
+    document.getElementById('cancelEditRelBtn').addEventListener('click', () => closeModal(document.getElementById('editRelModal')));
     document.getElementById('cancelEditRelBtnX').addEventListener('click', () => closeModal(document.getElementById('editRelModal')));
     document.getElementById('deleteRelFromEditBtn').addEventListener('click', deleteRelFromEdit);
 

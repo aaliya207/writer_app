@@ -15,7 +15,8 @@ from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from bs4 import BeautifulSoup
 import sys
-sys.stdout.reconfigure(encoding='utf-8')
+if sys.stdout is not None:
+    sys.stdout.reconfigure(encoding='utf-8')
 # Handle PyInstaller bundle paths
 if hasattr(sys, '_MEIPASS'):
     BASE_DIR = sys._MEIPASS
