@@ -24,10 +24,10 @@ function startFlask() {
     flaskArgs = [];
     flaskCwd = path.join(process.resourcesPath, 'flask_app');
   } else {
-    // ✅ DEV (use built exe instead of python)
-    flaskCmd = path.join(__dirname, '..', 'dist', 'app', 'app.exe');
-    flaskArgs = [];
-    flaskCwd = path.join(__dirname, '..', 'dist', 'app');
+    // ✅ DEV — run app.py with Python directly
+    flaskCmd = 'python';
+    flaskArgs = ['app.py'];
+    flaskCwd = path.join(__dirname, '..');
   }
 
   console.log('[Scripvia] Starting Flask:', flaskCmd);
@@ -35,7 +35,11 @@ function startFlask() {
   flaskProcess = spawn(flaskCmd, flaskArgs, {
     cwd: flaskCwd,
     windowsHide: true,
-    env: { ...process.env },
+    env: { 
+      ...process.env,
+      FLASK_ENV: 'development',
+      ENV_FILE: path.join(__dirname, '..', '.env')
+    },
   });
 
   flaskProcess.stdout.on('data', d => console.log('[Flask]', d.toString()));

@@ -299,8 +299,9 @@ def auth_login():
         'response_type': 'code', 'scope': ' '.join(app.config['GOOGLE_SCOPES']),
         'access_type': 'offline', 'prompt': 'consent', 'state': state
     }
-    return redirect('https://accounts.google.com/o/oauth2/auth?' + urllib.parse.urlencode(params))
-
+    url = 'https://accounts.google.com/o/oauth2/auth?' + urllib.parse.urlencode(params)
+    print('[DEBUG AUTH URL]', url)  # ← add this
+    return redirect(url)
 
 @app.route('/auth/callback')
 def auth_callback():

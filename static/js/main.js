@@ -127,28 +127,33 @@ function initQuill() {
             ]
         }
     });
-    quill.on('text-change', function() {
-    setSaveStatus('unsaved');
-    saveToLocalStorage();
-    resetCountdown();
-    updateStats();
-    setTimeout(() => {
-        const selection = quill.getSelection();
-        if (selection) {
-            const bounds = quill.getBounds(selection.index);
-            const container = document.getElementById('editorWrapper');
-            
-            if (bounds && container) {
-                const editorTop = document.querySelector('.ql-editor').offsetTop;
-                const cursorPosInEditor = editorTop + bounds.top;
-                const targetScrollPos = cursorPosInEditor - (container.clientHeight * 0.35);
-                if (cursorPosInEditor > container.scrollTop + (container.clientHeight * 0.35)) {
-                    container.scrollTop = Math.max(0, targetScrollPos);
+    quill.on('text-change', function () {
+        setSaveStatus('unsaved');
+        saveToLocalStorage();
+        resetCountdown();
+        updateStats();
+        setTimeout(() => {
+            const selection = quill.getSelection();
+            if (selection) {
+                const bounds = quill.getBounds(selection.index);
+                const container = document.getElementById('editorWrapper');
+
+                if (bounds && container) {
+                    const editorTop = document.querySelector('.ql-editor').offsetTop;
+                    const cursorPosInEditor = editorTop + bounds.top;
+                    const targetScrollPos = cursorPosInEditor - (container.clientHeight * 0.35);
+                    if (cursorPosInEditor > container.scrollTop + (container.clientHeight * 0.35)) {
+                        container.scrollTop = Math.max(0, targetScrollPos);
+                    }
                 }
             }
-        }
-    }, 0);
-});
+        }, 0);
+    });
+    const editorElement = document.querySelector('.ql-editor');
+    if (editorElement) {
+        editorElement.addEventListener('mousemove', handleWikiHover);
+        editorElement.addEventListener('mouseleave', hideWikiTooltip);
+    }
     wikiTooltip.addEventListener('mouseleave', hideWikiTooltip);
 }
 // --- API ---
@@ -538,13 +543,21 @@ async function saveEditChar(id) {
 function resetCharModal() {
     document.querySelector('#newCharModal .modal-title').textContent = 'New Character';
     const btn = document.getElementById('confirmCharBtn');
-    btn.textContent = 'Create Character'; delete btn.dataset.editId; delete btn.dataset.mode;
-    ['charNameInput', 'charAgeInput', 'charAppearanceInput', 'charPersonalityInput', 'charBackstoryInput', 'charImageInput'].forEach(id => document.getElementById(id).value = '');
+    btn.textContent = 'Create Character'; 
+    delete btn.dataset.editId; 
+    delete btn.dataset.mode;
+    document.getElementById('charNameInput').value = '';
     document.getElementById('charRoleInput').value = '';
+    document.getElementById('charAgeInput').value = '';
+    document.getElementById('charAppearanceInput').value = '';
+    document.getElementById('charPersonalityInput').value = '';
+    document.getElementById('charBackstoryInput').value = '';
+    document.getElementById('charImageInput').value = '';
     document.getElementById('charImgPreview').style.display = 'none';
     document.getElementById('charImgPreviewEl').src = '';
     document.getElementById('charImageFile').value = '';
 }
+
 
 // --- SCENES ---
 async function loadScenes(projectId) {
@@ -1506,7 +1519,10 @@ document.getElementById('cancelDocBtnX').addEventListener('click', () => closeMo
 document.getElementById('confirmDocBtn').addEventListener('click', createDocument);
 docTitleModalInput.addEventListener('keydown', e => { if (e.key === 'Enter') createDocument(); });
 
-document.getElementById('newCharBtn').addEventListener('click', () => openModal(newCharModal));
+document.getElementById('newCharBtn').addEventListener('click', () => {
+    resetCharModal();
+    openModal(newCharModal);
+});
 document.getElementById('cancelCharBtn').addEventListener('click', () => { resetCharModal(); closeModal(newCharModal); });
 document.getElementById('cancelCharBtnX').addEventListener('click', () => { resetCharModal(); closeModal(newCharModal); });
 document.getElementById('confirmCharBtn').addEventListener('click', () => {

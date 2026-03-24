@@ -1,7 +1,13 @@
 import os
 from dotenv import load_dotenv
+from pathlib import Path
+BASE_DIR = Path(__file__).parent.absolute()
+ENV_FILE = BASE_DIR / '.env'
 
-load_dotenv()
+if ENV_FILE.exists():
+    load_dotenv(ENV_FILE)
+else:
+    load_dotenv()
 
 class Config:
     SECRET_KEY                     = os.getenv('SECRET_KEY', 'scripvia-secret-key')
