@@ -482,7 +482,8 @@ async function createCharacter() {
             appearance: document.getElementById('charAppearanceInput').value.trim(),
             personality: document.getElementById('charPersonalityInput').value.trim(),
             backstory: document.getElementById('charBackstoryInput').value.trim(),
-            image_url: document.getElementById('charImageInput').value.trim()
+            image_url: document.getElementById('charImageInput').value.trim(),
+            image_focus: currentFocusPoint
         });
         closeModal(newCharModal);
         ['charNameInput', 'charAgeInput', 'charAppearanceInput', 'charPersonalityInput', 'charBackstoryInput', 'charImageInput'].forEach(id => document.getElementById(id).value = '');
@@ -513,6 +514,7 @@ async function openEditCharModal(id) {
         const preview = document.getElementById('charImgPreview');
         if (c.image_url) { document.getElementById('charImgPreviewEl').src = c.image_url; preview.style.display = 'block'; }
         else { preview.style.display = 'none'; }
+        setFocusPoint(c.image_focus || 'center');
         document.querySelector('#newCharModal .modal-title').textContent = 'Edit Character';
         const btn = document.getElementById('confirmCharBtn');
         btn.textContent = 'Save Changes'; btn.dataset.editId = id; btn.dataset.mode = 'edit';
@@ -532,19 +534,32 @@ async function saveEditChar(id) {
             appearance: document.getElementById('charAppearanceInput').value.trim(),
             personality: document.getElementById('charPersonalityInput').value.trim(),
             backstory: document.getElementById('charBackstoryInput').value.trim(),
-            image_url: document.getElementById('charImageInput').value.trim()
+            image_url: document.getElementById('charImageInput').value.trim(),
+            image_focus: currentFocusPoint
         });
         closeModal(newCharModal); resetCharModal();
         await loadCharacters(currentProjectId); await loadWikiData(currentProjectId);
     } catch (e) { console.error('saveEditChar:', e); }
     finally { btn.textContent = 'Save Changes'; btn.disabled = false; }
 }
+let currentFocusPoint = 'center';
 
+function setFocusPoint(focus) {
+    currentFocusPoint = focus;
+    ['focusTop', 'focusCenter', 'focusBottom'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        const isActive = btn.dataset.focus === focus;
+        btn.style.border = isActive ? '1px solid var(--accent)' : '1px solid var(--border)';
+        btn.style.background = isActive ? 'var(--accent-soft)' : 'var(--bg-elevated)';
+        btn.style.color = isActive ? 'var(--accent-bright)' : 'var(--text-muted)';
+    });
+}
 function resetCharModal() {
     document.querySelector('#newCharModal .modal-title').textContent = 'New Character';
     const btn = document.getElementById('confirmCharBtn');
-    btn.textContent = 'Create Character'; 
-    delete btn.dataset.editId; 
+    btn.textContent = 'Create Character';
+    delete btn.dataset.editId;
     delete btn.dataset.mode;
     document.getElementById('charNameInput').value = '';
     document.getElementById('charRoleInput').value = '';
@@ -555,7 +570,12 @@ function resetCharModal() {
     document.getElementById('charImageInput').value = '';
     document.getElementById('charImgPreview').style.display = 'none';
     document.getElementById('charImgPreviewEl').src = '';
-    document.getElementById('charImageFile').value = '';
+    const fileInput = document.getElementById('charImageFile');
+    fileInput.value = '';
+    fileInput.type = 'text';
+    fileInput.type = 'file';
+    document.getElementById('charImageInput').value = '';
+    setFocusPoint('center');
 }
 
 
@@ -689,9 +709,18 @@ async function loadWikiData(projectId) {
     try { wikiData = await api('GET', `/api/projects/${projectId}/wiki`); }
     catch (e) { console.error('loadWikiData:', e); }
 }
+function escapeRegex(str) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+// --- WIKI TOOLTIPS ---
+async function loadWikiData(projectId) {
+    try { wikiData = await api('GET', `/api/projects/${projectId}/wiki`); }
+    catch (e) { console.error('loadWikiData:', e); }
+}
+
+let wikiHoverTimer = null;
 
 function handleWikiHover(e) {
     if (!wikiData || !Object.keys(wikiData).length) return;
+
     let range;
     try {
         if (document.caretRangeFromPoint) {
@@ -713,21 +742,31 @@ function handleWikiHover(e) {
     const paraText = range.startContainer.textContent || '';
     const sortedKeys = Object.keys(wikiData).sort((a, b) => b.length - a.length);
 
+    let matchedKey = null;
     for (const key of sortedKeys) {
         const keyWordList = key.split(' ').map(w => w.toLowerCase());
         if (keyWordList.includes(hoveredWord) || hoveredWord === key) {
             if (new RegExp(`\\b${escapeRegex(key)}\\b`, 'i').test(paraText)) {
-                showWikiTooltip(wikiData[key], e.clientX, e.clientY);
-                return;
+                matchedKey = key;
+                break;
             }
         }
     }
-    hideWikiTooltip();
+
+    if (!matchedKey) { hideWikiTooltip(); return; }
+
+    // Capture position NOW before any async work
+    const x = e.clientX;
+    const y = e.clientY;
+
+    showWikiTooltip(matchedKey, x, y);
 }
 
-function escapeRegex(str) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function showWikiTooltip(key, x, y) {
+    // Use already-loaded wikiData — NO await, NO re-fetch here
+    const entry = wikiData[key];
+    if (!entry) return;
 
-function showWikiTooltip(entry, x, y) {
     const imgEl = document.getElementById('wikiTooltipImgEl');
     const imgWrap = document.getElementById('wikiCardImgWrap');
     const placeholder = document.getElementById('wikiCardPlaceholder');
@@ -745,31 +784,57 @@ function showWikiTooltip(entry, x, y) {
         typeEl.textContent = entry.category || 'Lore';
     }
 
+    // Image: assign onload BEFORE setting src, handle cached images too
     if (entry.image_url) {
-        imgEl.src = entry.image_url; imgEl.style.display = 'block';
-        imgWrap.style.display = 'block'; placeholder.style.display = 'none';
+        const focusPos =
+            entry.image_focus === 'top'    ? 'center top'    :
+            entry.image_focus === 'bottom' ? 'center bottom' :
+                                             'center center';
+
+        imgEl.onload = () => { imgEl.style.objectPosition = focusPos; };
         imgEl.onerror = () => { imgWrap.style.display = 'none'; };
+
+        const freshSrc = entry.image_url.startsWith('data:')
+            ? entry.image_url
+            : entry.image_url + '?t=' + Date.now();
+
+        imgEl.src = '';
+        imgEl.src = freshSrc;
+
+        // Fallback: if already cached and complete, onload won't fire
+        if (imgEl.complete && imgEl.naturalWidth > 0) {
+            imgEl.style.objectPosition = focusPos;
+        }
+
+        imgEl.style.display = 'block';
+        imgWrap.style.display = 'block';
+        placeholder.style.display = 'none';
     } else {
         imgWrap.style.display = 'none';
+        placeholder.style.display = 'flex';
     }
 
+    // Body content
     let bodyHtml = '';
     if (entry.type === 'character') {
-        if (entry.summary) bodyHtml += `<div class="wiki-card-field"><div class="wiki-card-field-label">Personality</div><div class="wiki-card-field-value">${escapeHtml(entry.summary)}</div></div>`;
-        if (entry.backstory) bodyHtml += `<div class="wiki-card-field"><div class="wiki-card-field-label">Backstory</div><div class="wiki-card-field-value">${escapeHtml(entry.backstory)}</div></div>`;
+        if (entry.summary)    bodyHtml += `<div class="wiki-card-field"><div class="wiki-card-field-label">Personality</div><div class="wiki-card-field-value">${escapeHtml(entry.summary)}</div></div>`;
+        if (entry.backstory)  bodyHtml += `<div class="wiki-card-field"><div class="wiki-card-field-label">Backstory</div><div class="wiki-card-field-value">${escapeHtml(entry.backstory)}</div></div>`;
         if (entry.appearance) bodyHtml += `<div class="wiki-card-field"><div class="wiki-card-field-label">Appearance</div><div class="wiki-card-field-value">${escapeHtml(entry.appearance)}</div></div>`;
     } else if (entry.summary) {
         bodyHtml = `<div class="wiki-card-field"><div class="wiki-card-field-value">${escapeHtml(entry.summary)}</div></div>`;
     }
     bodyEl.innerHTML = bodyHtml || `<div class="wiki-card-field-value" style="color:var(--text-muted);font-style:italic;">No details added yet.</div>`;
 
+    // Position tooltip — using the x/y captured synchronously in handleWikiHover
     const cW = 340, cH = 400;
-    let left = x + 20, top = y - 60;
-    if (left + cW > window.innerWidth - 20) left = x - cW - 20;
-    if (top + cH > window.innerHeight - 20) top = window.innerHeight - cH - 20;
+    let left = x + 20;
+    let top  = y - 60;
+    if (left + cW > window.innerWidth  - 20) left = x - cW - 20;
+    if (top  + cH > window.innerHeight - 20) top  = window.innerHeight - cH - 20;
     if (top < 10) top = 10;
-    wikiTooltip.style.left = `${left}px`;
-    wikiTooltip.style.top = `${top}px`;
+
+    wikiTooltip.style.left    = `${left}px`;
+    wikiTooltip.style.top     = `${top}px`;
     wikiTooltip.style.display = 'block';
 }
 
@@ -1078,6 +1143,7 @@ async function openRelWeb() {
         if (!chars.length) { alert('No characters in this project yet!'); return; }
         document.getElementById('relWebProjectName').textContent = (currentProjectData?.title || '') + ' — Character Web';
         document.getElementById('relWebOverlay').style.display = 'flex';
+        document.body.classList.add("rel-web-open");
         relCanvas = document.getElementById('relWebCanvas');
         relCtx = relCanvas.getContext('2d');
         await new Promise(r => setTimeout(r, 50));
@@ -1090,7 +1156,7 @@ async function openRelWeb() {
         const cx = cssW / 2, cy = cssH / 2, radius = Math.min(cx, cy) * 0.55;
         relNodes = chars.map((c, i) => {
             const angle = (2 * Math.PI * i) / chars.length - Math.PI / 2;
-            return { id: c.id, name: c.name, role: c.role || '', image_url: c.image_url || '', x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle), img: null };
+            return { id: c.id, name: c.name, role: c.role || '', image_url: c.image_url || '', image_focus: c.image_focus || 'center', x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle), img: null };
         });
         relEdges = rels;
         relNodes.forEach(node => {
@@ -1162,7 +1228,13 @@ function drawRelWeb() {
     relNodes.forEach(node => {
         ctx.save(); ctx.beginPath(); ctx.arc(node.x, node.y, nr, 0, Math.PI * 2); ctx.clip();
         if (node.img && node.img.complete && node.img.naturalWidth > 0) {
-            ctx.drawImage(node.img, node.x - nr, node.y - nr, nr * 2, nr * 2);
+            const iw = node.img.naturalWidth;
+            const ih = node.img.naturalHeight;
+            const srcSize = Math.min(iw, ih);
+            const srcX = (iw - srcSize) / 2;
+            const focus = node.image_focus || 'center';
+            const srcY = focus === 'top' ? 0 : focus === 'bottom' ? ih - srcSize : (ih - srcSize) / 2;
+            ctx.drawImage(node.img, srcX, srcY, srcSize, srcSize, node.x - nr, node.y - nr, nr * 2, nr * 2);
         } else {
             const grad = ctx.createRadialGradient(node.x, node.y - nr * 0.3, 0, node.x, node.y, nr);
             grad.addColorStop(0, '#5b7fb0'); grad.addColorStop(1, '#7b6fb0');
@@ -1263,8 +1335,11 @@ function isNearCurve(mx, my, edge) {
     return false;
 }
 
-function closeRelWeb() { document.getElementById('relWebOverlay').style.display = 'none'; relDragging = null; }
-
+function closeRelWeb() {
+    document.getElementById('relWebOverlay').style.display = 'none';
+    document.body.classList.remove("rel-web-open");
+    relDragging = null;
+}
 // --- OPEN TABS ---
 function addOpenTab(id, title, type = 'chapter') {
     if (openTabs.find(t => t.id === id && t.type === type)) { setActiveTab(id, type); return; }

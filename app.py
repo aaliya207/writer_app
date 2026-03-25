@@ -115,8 +115,9 @@ class Character(db.Model):
     personality = db.Column(db.Text, default='')
     backstory   = db.Column(db.Text, default='')
     appearance  = db.Column(db.Text, default='')
-    image_url   = db.Column(db.String(500), default='')
-    extra_notes = db.Column(db.Text, default='')
+    image_url    = db.Column(db.String(500), default='')
+    image_focus  = db.Column(db.String(20), default='center')
+    extra_notes  = db.Column(db.Text, default='')
     created_at  = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
@@ -124,7 +125,7 @@ class Character(db.Model):
             'id': self.id, 'project_id': self.project_id, 'name': self.name,
             'role': self.role, 'age': self.age, 'personality': self.personality,
             'backstory': self.backstory, 'appearance': self.appearance,
-            'image_url': self.image_url, 'extra_notes': self.extra_notes,
+            'image_url': self.image_url, 'image_focus': self.image_focus, 'extra_notes': self.extra_notes,
             'created_at': self.created_at.isoformat()
         }
 
@@ -154,15 +155,16 @@ class LoreItem(db.Model):
     name        = db.Column(db.String(200), nullable=False)
     category    = db.Column(db.String(100), default='item')
     description = db.Column(db.Text, default='')
-    image_url   = db.Column(db.String(500), default='')
-    extra_notes = db.Column(db.Text, default='')
+    image_url    = db.Column(db.String(500), default='')
+    image_focus  = db.Column(db.String(20), default='center')
+    extra_notes  = db.Column(db.Text, default='')
     created_at  = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
         return {
             'id': self.id, 'project_id': self.project_id, 'name': self.name,
             'category': self.category, 'description': self.description,
-            'image_url': self.image_url, 'extra_notes': self.extra_notes,
+            'image_url': self.image_url, 'image_focus': self.image_focus, 'extra_notes': self.extra_notes,
             'created_at': self.created_at.isoformat()
         }
 
@@ -537,7 +539,8 @@ def create_character(project_id):
     char = Character(project_id=project_id, name=data['name'], role=data.get('role', ''),
                      age=data.get('age', ''), personality=data.get('personality', ''),
                      backstory=data.get('backstory', ''), appearance=data.get('appearance', ''),
-                     image_url=data.get('image_url', ''), extra_notes=data.get('extra_notes', ''))
+                     image_url=data.get('image_url', ''), image_focus=data.get('image_focus', 'center'),
+                     extra_notes=data.get('extra_notes', ''))
     db.session.add(char)
     db.session.commit()
 
@@ -574,7 +577,7 @@ def get_character(char_id):
 def update_character(char_id):
     char = Character.query.get_or_404(char_id)
     data = request.get_json()
-    for f in ['name','role','age','personality','backstory','appearance','image_url','extra_notes']:
+    for f in ['name','role','age','personality','backstory','appearance','image_url','image_focus','extra_notes']:
         if f in data: setattr(char, f, data[f])
     db.session.commit()
     return jsonify(char.to_dict())
@@ -868,7 +871,7 @@ def get_wiki_data(project_id):
     for c in chars:
         wiki[c.name.lower()] = {
             'type': 'character', 'name': c.name, 'role': c.role, 'age': c.age,
-            'image_url': c.image_url, 'id': c.id,
+            'image_url': c.image_url, 'id': c.id, 'image_focus': c.image_focus,
             'summary':    c.personality[:200] + '...' if len(c.personality) > 200 else c.personality,
             'backstory':  c.backstory[:200]   + '...' if len(c.backstory)   > 200 else c.backstory,
             'appearance': c.appearance[:150]  + '...' if len(c.appearance)  > 150 else c.appearance,
@@ -876,7 +879,7 @@ def get_wiki_data(project_id):
     for l in lore:
         wiki[l.name.lower()] = {
             'type': 'lore', 'name': l.name, 'category': l.category,
-            'image_url': l.image_url, 'id': l.id,
+            'image_url': l.image_url, 'id': l.id, 'image_focus': l.image_focus,
             'summary': l.description[:150] + '...' if len(l.description) > 150 else l.description,
         }
     return jsonify(wiki)
@@ -1142,7 +1145,6 @@ def export_project_docx(project_id):
 
 if __name__ == '__main__':
     with app.app_context():
-        db.create_all()
-        print("Database initialized")
+        print("Starting app... DB will be created fresh if not exists.")
     print("Scripvia running at http://localhost:5000")
     app.run(debug=False, use_reloader=False)
