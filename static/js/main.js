@@ -51,21 +51,38 @@ const docTitleModalInput = document.getElementById('docTitleModalInput');
 const CREATIVE_GENRES = ['fantasy', 'sci-fi', 'fiction', 'romance', 'mystery', 'thriller', 'horror', 'historical'];
 
 // --- IMAGE UPLOAD ---
-function setupImageUpload(fileInputId, urlInputId, previewWrapId, previewImgId, clearBtnId) {
+function setupImageUpload(fileInputId, urlInputId, previewWrapId, previewImgId, clearBtnId, enableCrop = false) {
     const fileInput = document.getElementById(fileInputId);
     const urlInput = document.getElementById(urlInputId);
     const previewWrap = document.getElementById(previewWrapId);
     const previewImg = document.getElementById(previewImgId);
     const clearBtn = document.getElementById(clearBtnId);
 
+    if (!fileInput || !urlInput || !previewWrap || !previewImg || !clearBtn) {
+        console.warn('setupImageUpload skipped: missing DOM nodes', {
+            fileInputId, urlInputId, previewWrapId, previewImgId, clearBtnId
+        });
+        return;
+    }
+
+    function applyImage(src) {
+        urlInput.value = previewImg.src = src;
+        previewWrap.style.display = 'block';
+    }
+
+    function maybeCrop(src) {
+        if (enableCrop) {
+            openCropModal(src, applyImage);
+        } else {
+            applyImage(src);
+        }
+    }
+
     fileInput.addEventListener('change', () => {
         const file = fileInput.files[0];
         if (!file) return;
         const reader = new FileReader();
-        reader.onload = (e) => {
-            urlInput.value = previewImg.src = e.target.result;
-            previewWrap.style.display = 'block';
-        };
+        reader.onload = e => maybeCrop(e.target.result);
         reader.readAsDataURL(file);
     });
 
@@ -77,6 +94,13 @@ function setupImageUpload(fileInputId, urlInputId, previewWrapId, previewImgId, 
             previewImg.onerror = () => { previewWrap.style.display = 'none'; };
         } else {
             previewWrap.style.display = 'none';
+        }
+    });
+
+    urlInput.addEventListener('blur', () => {
+        const val = urlInput.value.trim();
+        if (enableCrop && val && (val.startsWith('http') || val.startsWith('data:'))) {
+            maybeCrop(val);
         }
     });
 
@@ -483,7 +507,7 @@ async function createCharacter() {
             personality: document.getElementById('charPersonalityInput').value.trim(),
             backstory: document.getElementById('charBackstoryInput').value.trim(),
             image_url: document.getElementById('charImageInput').value.trim(),
-            image_focus: currentFocusPoint
+            image_focus: 'center'
         });
         closeModal(newCharModal);
         ['charNameInput', 'charAgeInput', 'charAppearanceInput', 'charPersonalityInput', 'charBackstoryInput', 'charImageInput'].forEach(id => document.getElementById(id).value = '');
@@ -514,7 +538,6 @@ async function openEditCharModal(id) {
         const preview = document.getElementById('charImgPreview');
         if (c.image_url) { document.getElementById('charImgPreviewEl').src = c.image_url; preview.style.display = 'block'; }
         else { preview.style.display = 'none'; }
-        setFocusPoint(c.image_focus || 'center');
         document.querySelector('#newCharModal .modal-title').textContent = 'Edit Character';
         const btn = document.getElementById('confirmCharBtn');
         btn.textContent = 'Save Changes'; btn.dataset.editId = id; btn.dataset.mode = 'edit';
@@ -535,25 +558,143 @@ async function saveEditChar(id) {
             personality: document.getElementById('charPersonalityInput').value.trim(),
             backstory: document.getElementById('charBackstoryInput').value.trim(),
             image_url: document.getElementById('charImageInput').value.trim(),
-            image_focus: currentFocusPoint
+            image_focus: 'center'
         });
         closeModal(newCharModal); resetCharModal();
         await loadCharacters(currentProjectId); await loadWikiData(currentProjectId);
     } catch (e) { console.error('saveEditChar:', e); }
     finally { btn.textContent = 'Save Changes'; btn.disabled = false; }
 }
-let currentFocusPoint = 'center';
+// --- IMAGE CROP ---
+let cropCallback = null;
+let cropRect = null;
+let cropDragging = false;
+let cropStart = null;
+let cropImage = new Image();
 
-function setFocusPoint(focus) {
-    currentFocusPoint = focus;
-    ['focusTop', 'focusCenter', 'focusBottom'].forEach(id => {
-        const btn = document.getElementById(id);
-        if (!btn) return;
-        const isActive = btn.dataset.focus === focus;
-        btn.style.border = isActive ? '1px solid var(--accent)' : '1px solid var(--border)';
-        btn.style.background = isActive ? 'var(--accent-soft)' : 'var(--bg-elevated)';
-        btn.style.color = isActive ? 'var(--accent-bright)' : 'var(--text-muted)';
+let cropCanvasInited = false;
+
+function openCropModal(imageSrc, callback) {
+    const cropModal = document.getElementById('cropModal');
+    const canvas = document.getElementById('cropCanvas');
+
+    if (!cropModal || !canvas) {
+        console.warn('Crop modal is unavailable; using image without cropping.');
+        if (callback) callback(imageSrc);
+        return;
+    }
+
+    cropCallback = callback;
+    cropRect = null;
+    cropImage = new Image();
+
+    if (!cropCanvasInited) {
+        initCropCanvas();
+        cropCanvasInited = true;
+    }
+
+    openModal(cropModal);
+
+    cropImage.onload = () => {
+        const canvasWrap = document.querySelector('.crop-canvas-wrap');
+        const maxW = Math.min(480, canvasWrap?.clientWidth || window.innerWidth * 0.82);
+        const maxH = Math.min(window.innerHeight * 0.5, canvasWrap?.clientHeight || 360);
+        const scale = Math.min(
+            maxW / cropImage.naturalWidth,
+            maxH / cropImage.naturalHeight,
+            1
+        );
+        canvas.width = cropImage.naturalWidth * scale;
+        canvas.height = cropImage.naturalHeight * scale;
+        canvas._scale = scale;
+        drawCropCanvas();
+    };
+    cropImage.src = imageSrc;
+}
+
+function drawCropCanvas() {
+    const canvas = document.getElementById('cropCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(cropImage, 0, 0, canvas.width, canvas.height);
+    if (!cropRect) return;
+    const { x, y, w, h } = cropRect;
+    // Dim outside
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, canvas.width, y);
+    ctx.fillRect(0, y + h, canvas.width, canvas.height - y - h);
+    ctx.fillRect(0, y, x, h);
+    ctx.fillRect(x + w, y, canvas.width - x - w, h);
+    // Border
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 3]);
+    ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([]);
+    // Corner handles
+    const hs = 8;
+    ctx.fillStyle = '#fff';
+    [[x, y], [x + w, y], [x, y + h], [x + w, y + h]].forEach(([cx, cy]) => {
+        ctx.fillRect(cx - hs / 2, cy - hs / 2, hs, hs);
     });
+}
+
+function initCropCanvas() {
+    const canvas = document.getElementById('cropCanvas');
+    if (!canvas) return;
+
+    canvas.addEventListener('mousedown', e => {
+        const r = canvas.getBoundingClientRect();
+        cropStart = { x: e.clientX - r.left, y: e.clientY - r.top };
+        cropDragging = true;
+        cropRect = null;
+    });
+
+    canvas.addEventListener('mousemove', e => {
+        if (!cropDragging || !cropStart) return;
+        const r = canvas.getBoundingClientRect();
+        const mx = Math.max(0, Math.min(canvas.width, e.clientX - r.left));
+        const my = Math.max(0, Math.min(canvas.height, e.clientY - r.top));
+        cropRect = {
+            x: Math.min(cropStart.x, mx),
+            y: Math.min(cropStart.y, my),
+            w: Math.abs(mx - cropStart.x),
+            h: Math.abs(my - cropStart.y)
+        };
+        drawCropCanvas();
+    });
+
+    canvas.addEventListener('mouseup', () => { cropDragging = false; });
+    canvas.addEventListener('mouseleave', () => { cropDragging = false; });
+}
+
+function confirmCrop() {
+    const cropModal = document.getElementById('cropModal');
+    const cropCanvas = document.getElementById('cropCanvas');
+
+    if (!cropModal || !cropCanvas) {
+        if (cropCallback) cropCallback(cropImage.src);
+        return;
+    }
+
+    if (!cropRect || cropRect.w < 5 || cropRect.h < 5) {
+        // No crop selected — use full image
+        if (cropCallback) cropCallback(cropImage.src);
+        closeModal(cropModal);
+        return;
+    }
+    const scale = cropCanvas._scale || 1;
+    const sx = cropRect.x / scale;
+    const sy = cropRect.y / scale;
+    const sw = cropRect.w / scale;
+    const sh = cropRect.h / scale;
+    const out = document.createElement('canvas');
+    out.width = sw; out.height = sh;
+    out.getContext('2d').drawImage(cropImage, sx, sy, sw, sh, 0, 0, sw, sh);
+    const cropped = out.toDataURL('image/jpeg', 0.92);
+    if (cropCallback) cropCallback(cropped);
+    closeModal(cropModal);
 }
 function resetCharModal() {
     document.querySelector('#newCharModal .modal-title').textContent = 'New Character';
@@ -575,7 +716,6 @@ function resetCharModal() {
     fileInput.type = 'text';
     fileInput.type = 'file';
     document.getElementById('charImageInput').value = '';
-    setFocusPoint('center');
 }
 
 
@@ -736,20 +876,36 @@ function handleWikiHover(e) {
         range.expand('word');
     } catch (e) { return; }
 
-    const hoveredWord = range.toString().trim().toLowerCase();
-    if (!hoveredWord || hoveredWord.length < 2) { hideWikiTooltip(); return; }
-
-    const paraText = range.startContainer.textContent || '';
     const sortedKeys = Object.keys(wikiData).sort((a, b) => b.length - a.length);
+    const textNode = range.startContainer;
+    const paraText = textNode?.textContent || '';
+    const paraTextLower = paraText.toLowerCase();
+    const caretOffset = range.startOffset;
+
+    if (!paraTextLower.trim()) { hideWikiTooltip(); return; }
 
     let matchedKey = null;
     for (const key of sortedKeys) {
-        const keyWordList = key.split(' ').map(w => w.toLowerCase());
-        if (keyWordList.includes(hoveredWord) || hoveredWord === key) {
-            if (new RegExp(`\\b${escapeRegex(key)}\\b`, 'i').test(paraText)) {
+        const searchKey = key.toLowerCase();
+        let matchIndex = paraTextLower.indexOf(searchKey);
+
+        while (matchIndex !== -1) {
+            const matchEnd = matchIndex + searchKey.length;
+            const beforeChar = matchIndex > 0 ? paraTextLower[matchIndex - 1] : '';
+            const afterChar = matchEnd < paraTextLower.length ? paraTextLower[matchEnd] : '';
+            const startsAtBoundary = !beforeChar || !/[a-z0-9_]/i.test(beforeChar);
+            const endsAtBoundary = !afterChar || !/[a-z0-9_]/i.test(afterChar);
+            const isInsideMatch = caretOffset >= matchIndex && caretOffset <= matchEnd;
+
+            if (startsAtBoundary && endsAtBoundary && isInsideMatch) {
                 matchedKey = key;
                 break;
             }
+            matchIndex = paraTextLower.indexOf(searchKey, matchIndex + 1);
+        }
+
+        if (matchedKey) {
+            break;
         }
     }
 
@@ -786,10 +942,7 @@ function showWikiTooltip(key, x, y) {
 
     // Image: assign onload BEFORE setting src, handle cached images too
     if (entry.image_url) {
-        const focusPos =
-            entry.image_focus === 'top'    ? 'center top'    :
-            entry.image_focus === 'bottom' ? 'center bottom' :
-                                             'center center';
+        const focusPos = 'center center';
 
         imgEl.onload = () => { imgEl.style.objectPosition = focusPos; };
         imgEl.onerror = () => { imgWrap.style.display = 'none'; };
@@ -817,25 +970,29 @@ function showWikiTooltip(key, x, y) {
     // Body content
     let bodyHtml = '';
     if (entry.type === 'character') {
-        if (entry.summary)    bodyHtml += `<div class="wiki-card-field"><div class="wiki-card-field-label">Personality</div><div class="wiki-card-field-value">${escapeHtml(entry.summary)}</div></div>`;
-        if (entry.backstory)  bodyHtml += `<div class="wiki-card-field"><div class="wiki-card-field-label">Backstory</div><div class="wiki-card-field-value">${escapeHtml(entry.backstory)}</div></div>`;
+        if (entry.summary) bodyHtml += `<div class="wiki-card-field"><div class="wiki-card-field-label">Personality</div><div class="wiki-card-field-value">${escapeHtml(entry.summary)}</div></div>`;
+        if (entry.backstory) bodyHtml += `<div class="wiki-card-field"><div class="wiki-card-field-label">Backstory</div><div class="wiki-card-field-value">${escapeHtml(entry.backstory)}</div></div>`;
         if (entry.appearance) bodyHtml += `<div class="wiki-card-field"><div class="wiki-card-field-label">Appearance</div><div class="wiki-card-field-value">${escapeHtml(entry.appearance)}</div></div>`;
     } else if (entry.summary) {
         bodyHtml = `<div class="wiki-card-field"><div class="wiki-card-field-value">${escapeHtml(entry.summary)}</div></div>`;
     }
     bodyEl.innerHTML = bodyHtml || `<div class="wiki-card-field-value" style="color:var(--text-muted);font-style:italic;">No details added yet.</div>`;
 
-    // Position tooltip — using the x/y captured synchronously in handleWikiHover
-    const cW = 340, cH = 400;
+    wikiTooltip.style.visibility = 'hidden';
+    wikiTooltip.style.display = 'block';
+
+    // Position tooltip after layout so the card can size to the full image.
+    const cW = wikiTooltip.offsetWidth || 360;
+    const cH = wikiTooltip.offsetHeight || 420;
     let left = x + 20;
-    let top  = y - 60;
-    if (left + cW > window.innerWidth  - 20) left = x - cW - 20;
-    if (top  + cH > window.innerHeight - 20) top  = window.innerHeight - cH - 20;
+    let top = y - 60;
+    if (left + cW > window.innerWidth - 20) left = x - cW - 20;
+    if (top + cH > window.innerHeight - 20) top = window.innerHeight - cH - 20;
     if (top < 10) top = 10;
 
-    wikiTooltip.style.left    = `${left}px`;
-    wikiTooltip.style.top     = `${top}px`;
-    wikiTooltip.style.display = 'block';
+    wikiTooltip.style.left = `${left}px`;
+    wikiTooltip.style.top = `${top}px`;
+    wikiTooltip.style.visibility = 'visible';
 }
 
 function hideWikiTooltip() { wikiTooltip.style.display = 'none'; }
@@ -1156,7 +1313,7 @@ async function openRelWeb() {
         const cx = cssW / 2, cy = cssH / 2, radius = Math.min(cx, cy) * 0.55;
         relNodes = chars.map((c, i) => {
             const angle = (2 * Math.PI * i) / chars.length - Math.PI / 2;
-            return { id: c.id, name: c.name, role: c.role || '', image_url: c.image_url || '', image_focus: c.image_focus || 'center', x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle), img: null };
+            return { id: c.id, name: c.name, role: c.role || '', image_url: c.image_url || '', x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle), img: null };
         });
         relEdges = rels;
         relNodes.forEach(node => {
@@ -1232,8 +1389,7 @@ function drawRelWeb() {
             const ih = node.img.naturalHeight;
             const srcSize = Math.min(iw, ih);
             const srcX = (iw - srcSize) / 2;
-            const focus = node.image_focus || 'center';
-            const srcY = focus === 'top' ? 0 : focus === 'bottom' ? ih - srcSize : (ih - srcSize) / 2;
+            const srcY = (ih - srcSize) / 2;
             ctx.drawImage(node.img, srcX, srcY, srcSize, srcSize, node.x - nr, node.y - nr, nr * 2, nr * 2);
         } else {
             const grad = ctx.createRadialGradient(node.x, node.y - nr * 0.3, 0, node.x, node.y, nr);
@@ -1506,8 +1662,17 @@ function escapeHtml(str) {
 }
 
 // --- MODALS ---
-function openModal(modal) { modal.classList.add('active'); }
-function closeModal(modal) { modal.classList.remove('active'); }
+function openModal(modal) {
+    if (!modal) {
+        console.warn('openModal called with null modal');
+        return;
+    }
+    modal.classList.add('active');
+}
+function closeModal(modal) {
+    if (!modal) return;
+    modal.classList.remove('active');
+}
 
 document.querySelectorAll('.modal-overlay').forEach(o => {
     o.addEventListener('click', e => { if (e.target === o) closeModal(o); });
@@ -1622,8 +1787,6 @@ saveBtn.addEventListener('click', saveDocument);
 
 // --- INIT ---
 document.addEventListener('DOMContentLoaded', () => {
-    setupImageUpload('charImageFile', 'charImageInput', 'charImgPreview', 'charImgPreviewEl', 'clearCharImg');
-    setupImageUpload('loreImageFile', 'loreImageInput', 'loreImgPreview', 'loreImgPreviewEl', 'clearLoreImg');
 
     document.getElementById('wikiCardClose').addEventListener('click', hideWikiTooltip);
     document.getElementById('backToOverview').addEventListener('click', () => { hideEditor(); showProjectOverview(currentProjectId); });
@@ -1660,4 +1823,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!data.logged_in && !localStorage.getItem('scripvia_guest')) { window.location.href = '/login'; return; }
         applyTheme(); applySidebar(); initQuill(); loadProjects(); checkAuthState();
     }).catch(() => { applyTheme(); applySidebar(); initQuill(); loadProjects(); });
+    setupImageUpload('charImageFile', 'charImageInput', 'charImgPreview', 'charImgPreviewEl', 'clearCharImg', true);
+    setupImageUpload('loreImageFile', 'loreImageInput', 'loreImgPreview', 'loreImgPreviewEl', 'clearLoreImg', false);
+    document.getElementById('cropConfirmBtn')?.addEventListener('click', confirmCrop);
+    document.getElementById('cropModalClose')?.addEventListener('click', () => closeModal(document.getElementById('cropModal')));
+    document.getElementById('cropCancelBtn')?.addEventListener('click', () => closeModal(document.getElementById('cropModal')));
 });
