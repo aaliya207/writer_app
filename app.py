@@ -1,8 +1,8 @@
-from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for, abort
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
 from config import Config
-import os, urllib.parse, requests as http_requests, secrets, re, threading, io
+import os, urllib.parse, requests as http_requests, secrets, re, threading, io, json, base64
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaInMemoryUpload
 from reportlab.lib.pagesizes import A4
@@ -69,6 +69,7 @@ class Project(db.Model):
     description     = db.Column(db.Text, default='')
     genre           = db.Column(db.String(100), default='general')
     user_id         = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    guest_session_id = db.Column(db.String(200), default='')
     drive_folder_id = db.Column(db.String(200), default='')
     created_at      = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at      = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -115,19 +116,34 @@ class Character(db.Model):
     personality = db.Column(db.Text, default='')
     backstory   = db.Column(db.Text, default='')
     appearance  = db.Column(db.Text, default='')
+    titles      = db.Column(db.Text, default='[]')
     image_url    = db.Column(db.String(500), default='')
     image_focus  = db.Column(db.String(20), default='center')
     extra_notes  = db.Column(db.Text, default='')
+    drive_file_id = db.Column(db.String(200), default='')
+    drive_image_file_id = db.Column(db.String(200), default='')
     created_at  = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
         return {
             'id': self.id, 'project_id': self.project_id, 'name': self.name,
             'role': self.role, 'age': self.age, 'personality': self.personality,
-            'backstory': self.backstory, 'appearance': self.appearance,
+            'backstory': self.backstory, 'appearance': self.appearance, 'titles': self.get_titles(),
             'image_url': self.image_url, 'image_focus': self.image_focus, 'extra_notes': self.extra_notes,
+            'drive_file_id': self.drive_file_id, 'drive_image_file_id': self.drive_image_file_id,
             'created_at': self.created_at.isoformat()
         }
+
+    def get_titles(self):
+        try:
+            parsed = json.loads(self.titles or '[]')
+            return [str(title).strip() for title in parsed if str(title).strip()]
+        except Exception:
+            return []
+
+    def set_titles(self, titles):
+        clean_titles = [str(title).strip() for title in (titles or []) if str(title).strip()]
+        self.titles = json.dumps(clean_titles)
 
 
 class Scene(db.Model):
@@ -137,6 +153,7 @@ class Scene(db.Model):
     content           = db.Column(db.Text, default='')
     mood              = db.Column(db.String(100), default='')
     connected_chapter = db.Column(db.String(200), default='')
+    drive_file_id     = db.Column(db.String(200), default='')
     created_at        = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at        = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -145,6 +162,7 @@ class Scene(db.Model):
             'id': self.id, 'project_id': self.project_id, 'title': self.title,
             'content': self.content, 'mood': self.mood,
             'connected_chapter': self.connected_chapter,
+            'drive_file_id': self.drive_file_id,
             'created_at': self.created_at.isoformat(), 'updated_at': self.updated_at.isoformat()
         }
 
@@ -158,6 +176,8 @@ class LoreItem(db.Model):
     image_url    = db.Column(db.String(500), default='')
     image_focus  = db.Column(db.String(20), default='center')
     extra_notes  = db.Column(db.Text, default='')
+    drive_file_id = db.Column(db.String(200), default='')
+    drive_image_file_id = db.Column(db.String(200), default='')
     created_at  = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
@@ -165,6 +185,7 @@ class LoreItem(db.Model):
             'id': self.id, 'project_id': self.project_id, 'name': self.name,
             'category': self.category, 'description': self.description,
             'image_url': self.image_url, 'image_focus': self.image_focus, 'extra_notes': self.extra_notes,
+            'drive_file_id': self.drive_file_id, 'drive_image_file_id': self.drive_image_file_id,
             'created_at': self.created_at.isoformat()
         }
 
@@ -208,6 +229,55 @@ def get_current_user():
     return User.query.get(user_id) if user_id else None
 
 
+def get_guest_session_id():
+    guest_session_id = session.get('guest_session_id')
+    if not guest_session_id:
+        guest_session_id = secrets.token_urlsafe(24)
+        session['guest_session_id'] = guest_session_id
+        session.permanent = True
+    return guest_session_id
+
+
+def project_is_owned_by_current_session(project):
+    user = get_current_user()
+    if user:
+        return project.user_id == user.id
+    return project.user_id is None and project.guest_session_id == get_guest_session_id()
+
+
+def maybe_claim_legacy_projects():
+    legacy_projects = Project.query.filter(
+        Project.user_id.is_(None),
+        (Project.guest_session_id == '') | Project.guest_session_id.is_(None)
+    ).all()
+    if not legacy_projects:
+        return
+
+    user = get_current_user()
+    owned_count = Project.query.filter_by(user_id=user.id).count() if user else Project.query.filter_by(
+        user_id=None, guest_session_id=get_guest_session_id()
+    ).count()
+    if owned_count:
+        return
+
+    for project in legacy_projects:
+        if user:
+            project.user_id = user.id
+            project.guest_session_id = ''
+        else:
+            project.user_id = None
+            project.guest_session_id = get_guest_session_id()
+    db.session.commit()
+
+
+def get_project_or_404(project_id):
+    maybe_claim_legacy_projects()
+    project = Project.query.get_or_404(project_id)
+    if not project_is_owned_by_current_session(project):
+        abort(404)
+    return project
+
+
 def get_drive_service(user):
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
@@ -237,15 +307,137 @@ def get_or_create_folder(drive, name, parent_id=None):
     return drive.files().create(body=meta, fields='id').execute().get('id')
 
 
+def drive_item_exists(drive, file_id):
+    if not file_id:
+        return False
+    try:
+        drive.files().get(fileId=file_id, fields='id').execute()
+        return True
+    except Exception:
+        return False
+
+
+def drive_safe_name(name, fallback='untitled'):
+    clean = re.sub(r'[\\/:*?"<>|]+', ' ', (name or '').strip())
+    clean = re.sub(r'\s+', ' ', clean).strip().rstrip('.')
+    return clean[:120] or fallback
+
+
+def find_drive_file_id(drive, name, parent_id):
+    safe_name = name.replace("'", "\\'")
+    query = f"name='{safe_name}' and '{parent_id}' in parents and trashed=false"
+    files = drive.files().list(q=query, fields='files(id)', pageSize=1).execute().get('files', [])
+    return files[0]['id'] if files else ''
+
+
 def create_drive_file(drive, name, content, parent_id):
     media  = MediaInMemoryUpload(content.encode('utf-8'), mimetype='text/plain', resumable=False)
-    meta   = {'name': f"{name}.txt", 'parents': [parent_id]}
+    meta   = {'name': f"{drive_safe_name(name)}.txt", 'parents': [parent_id]}
     return drive.files().create(body=meta, media_body=media, fields='id').execute().get('id')
 
 
 def update_drive_file(drive, file_id, name, content):
     media = MediaInMemoryUpload(content.encode('utf-8'), mimetype='text/plain', resumable=False)
-    drive.files().update(fileId=file_id, body={'name': f"{name}.txt"}, media_body=media).execute()
+    drive.files().update(fileId=file_id, body={'name': f"{drive_safe_name(name)}.txt"}, media_body=media).execute()
+
+
+def ensure_drive_file_parent(drive, file_id, parent_id):
+    if not file_id or not parent_id:
+        return
+    if not drive_item_exists(drive, file_id):
+        return
+    meta = drive.files().get(fileId=file_id, fields='parents').execute()
+    parents = meta.get('parents', []) or []
+    if parents == [parent_id]:
+        return
+    remove_parents = ','.join(parent for parent in parents if parent != parent_id)
+    drive.files().update(
+        fileId=file_id,
+        addParents=parent_id if parent_id not in parents else None,
+        removeParents=remove_parents or None,
+        fields='id, parents'
+    ).execute()
+
+
+def upsert_drive_text_file(drive, name, content, parent_id, existing_file_id=''):
+    file_name = f"{drive_safe_name(name)}.txt"
+    file_id = existing_file_id if drive_item_exists(drive, existing_file_id) else ''
+    if not file_id:
+        file_id = find_drive_file_id(drive, file_name, parent_id)
+    if file_id:
+        try:
+            update_drive_file(drive, file_id, name, content)
+        except Exception:
+            file_id = ''
+    if file_id:
+        ensure_drive_file_parent(drive, file_id, parent_id)
+        return file_id
+    return create_drive_file(drive, name, content, parent_id)
+
+
+def delete_drive_file_if_exists(drive, file_id):
+    if not file_id:
+        return
+    try:
+        drive.files().delete(fileId=file_id).execute()
+    except Exception as e:
+        print(f"Drive delete error: {e}")
+
+
+def fetch_image_payload(image_url):
+    if not image_url:
+        return None, None
+    try:
+        if image_url.startswith('data:'):
+            header, encoded = image_url.split(',', 1)
+            mime = header.split(';', 1)[0].split(':', 1)[1] if ':' in header else 'image/png'
+            return base64.b64decode(encoded), mime
+        response = http_requests.get(image_url, timeout=15)
+        response.raise_for_status()
+        return response.content, response.headers.get('Content-Type', 'image/png').split(';', 1)[0]
+    except Exception as e:
+        print(f"Image fetch error: {e}")
+        return None, None
+
+
+def image_extension_for_mime(mime_type):
+    mapping = {
+        'image/jpeg': '.jpg',
+        'image/jpg': '.jpg',
+        'image/png': '.png',
+        'image/webp': '.webp',
+        'image/gif': '.gif'
+    }
+    return mapping.get((mime_type or '').lower(), '.png')
+
+
+def upsert_drive_image_file(drive, name, image_url, parent_id, existing_file_id=''):
+    if not image_url:
+        if existing_file_id:
+            delete_drive_file_if_exists(drive, existing_file_id)
+        return ''
+    image_bytes, mime_type = fetch_image_payload(image_url)
+    if not image_bytes:
+        return existing_file_id or ''
+    ext = image_extension_for_mime(mime_type)
+    file_name = f"{drive_safe_name(name)} image{ext}"
+    media = MediaInMemoryUpload(image_bytes, mimetype=mime_type or 'image/png', resumable=False)
+    file_id = existing_file_id if drive_item_exists(drive, existing_file_id) else ''
+    if not file_id:
+        file_id = find_drive_file_id(drive, file_name, parent_id)
+    if file_id:
+        try:
+            drive.files().update(fileId=file_id, body={'name': file_name}, media_body=media).execute()
+        except Exception:
+            file_id = ''
+    if file_id:
+        ensure_drive_file_parent(drive, file_id, parent_id)
+        return file_id
+    return drive.files().create(
+        body={'name': file_name, 'parents': [parent_id]},
+        media_body=media,
+        fields='id'
+    ).execute().get('id')
 
 
 def html_to_plain_text(html):
@@ -259,6 +451,15 @@ def html_to_plain_text(html):
 
 def setup_scripvia_folder(user):
     if user.scripvia_folder_id:
+        try:
+            drive = get_drive_service(user)
+            if drive_item_exists(drive, user.scripvia_folder_id):
+                return user.scripvia_folder_id
+            user.scripvia_folder_id = ''
+            db.session.commit()
+        except Exception:
+            pass
+    if user.scripvia_folder_id:
         return user.scripvia_folder_id
     try:
         drive = get_drive_service(user)
@@ -269,6 +470,138 @@ def setup_scripvia_folder(user):
     except Exception as e:
         print(f"Could not create Scripvia folder: {e}")
         return None
+
+
+def ensure_project_drive_structure(drive, user, project):
+    if user.scripvia_folder_id and not drive_item_exists(drive, user.scripvia_folder_id):
+        user.scripvia_folder_id = ''
+        db.session.commit()
+    if project.drive_folder_id and not drive_item_exists(drive, project.drive_folder_id):
+        project.drive_folder_id = ''
+        db.session.commit()
+    if not user.scripvia_folder_id:
+        user.scripvia_folder_id = get_or_create_folder(drive, 'Scripvia')
+        db.session.commit()
+    if not project.drive_folder_id:
+        project.drive_folder_id = get_or_create_folder(drive, drive_safe_name(project.title), parent_id=user.scripvia_folder_id)
+        db.session.commit()
+
+    folders = {
+        'project': project.drive_folder_id,
+        'chapters': get_or_create_folder(drive, 'Chapters', parent_id=project.drive_folder_id)
+    }
+    if project.genre in CREATIVE_GENRES:
+        folders['characters'] = get_or_create_folder(drive, 'Characters', parent_id=project.drive_folder_id)
+        folders['scenes'] = get_or_create_folder(drive, 'Scenes', parent_id=project.drive_folder_id)
+        folders['lore'] = get_or_create_folder(drive, 'Lore', parent_id=project.drive_folder_id)
+        folders['web'] = get_or_create_folder(drive, 'Web', parent_id=project.drive_folder_id)
+    return folders
+
+
+def build_document_drive_content(doc):
+    return f"{doc.title}\n{'=' * len(doc.title)}\n\n{html_to_plain_text(doc.content or '')}"
+
+
+def build_character_drive_content(char):
+    titles = ', '.join(char.get_titles()) or 'None'
+    return (
+        f"Name: {char.name}\n"
+        f"Titles: {titles}\n"
+        f"Role: {char.role or 'None'}\n"
+        f"Age: {char.age or 'Unknown'}\n\n"
+        f"Appearance:\n{char.appearance or ''}\n\n"
+        f"Personality:\n{char.personality or ''}\n\n"
+        f"Backstory:\n{char.backstory or ''}\n\n"
+        f"Notes:\n{char.extra_notes or ''}"
+    )
+
+
+def build_scene_drive_content(scene):
+    return (
+        f"Scene: {scene.title}\n"
+        f"Mood: {scene.mood or 'None'}\n"
+        f"Connected Chapter: {scene.connected_chapter or 'None'}\n\n"
+        f"{html_to_plain_text(scene.content or '')}"
+    )
+
+
+def build_lore_drive_content(item):
+    return (
+        f"Name: {item.name}\n"
+        f"Category: {item.category or 'item'}\n\n"
+        f"Description:\n{item.description or ''}\n\n"
+        f"Notes:\n{item.extra_notes or ''}"
+    )
+
+
+def build_relationships_drive_content(project_id):
+    rels = CharacterRelationship.query.filter_by(project_id=project_id).all()
+    if not rels:
+        return "No relationships yet."
+    return '\n'.join(
+        f"{rel.char_a.name if rel.char_a else ''} {format_relation_text(rel.relation_type)} {rel.char_b.name if rel.char_b else ''}".strip()
+        for rel in rels
+    )
+
+
+def format_relation_text(value):
+    return (value or 'is connected to').strip()
+
+
+def sync_project_relationships_to_drive(user, project):
+    drive = get_drive_service(user)
+    folders = ensure_project_drive_structure(drive, user, project)
+    if 'web' not in folders:
+        return
+    upsert_drive_text_file(
+        drive,
+        'relationships',
+        build_relationships_drive_content(project.id),
+        folders['web']
+    )
+
+
+def sync_full_project_to_drive(user, project):
+    drive = get_drive_service(user)
+    folders = ensure_project_drive_structure(drive, user, project)
+
+    for doc in Document.query.filter_by(project_id=project.id).order_by(Document.order_index.asc(), Document.created_at.asc()).all():
+        doc.drive_file_id = upsert_drive_text_file(
+            drive, doc.title, build_document_drive_content(doc), folders['chapters'], doc.drive_file_id
+        )
+
+    if project.genre in CREATIVE_GENRES:
+        characters_folder = folders.get('characters')
+        scenes_folder = folders.get('scenes')
+        lore_folder = folders.get('lore')
+
+        for char in Character.query.filter_by(project_id=project.id).order_by(Character.name.asc()).all():
+            if characters_folder:
+                char.drive_file_id = upsert_drive_text_file(
+                    drive, char.name, build_character_drive_content(char), characters_folder, char.drive_file_id
+                )
+                char.drive_image_file_id = upsert_drive_image_file(
+                    drive, char.name, char.image_url, characters_folder, char.drive_image_file_id
+                )
+
+        for scene in Scene.query.filter_by(project_id=project.id).order_by(Scene.updated_at.desc()).all():
+            if scenes_folder:
+                scene.drive_file_id = upsert_drive_text_file(
+                    drive, scene.title, build_scene_drive_content(scene), scenes_folder, scene.drive_file_id
+                )
+
+        for item in LoreItem.query.filter_by(project_id=project.id).order_by(LoreItem.name.asc()).all():
+            if lore_folder:
+                item.drive_file_id = upsert_drive_text_file(
+                    drive, item.name, build_lore_drive_content(item), lore_folder, item.drive_file_id
+                )
+                item.drive_image_file_id = upsert_drive_image_file(
+                    drive, item.name, item.image_url, lore_folder, item.drive_image_file_id
+                )
+
+        sync_project_relationships_to_drive(user, project)
+
+    db.session.commit()
 
 
 def drive_bg(fn, *args):
@@ -344,19 +677,27 @@ def auth_logout():
 @app.route('/auth/me')
 def auth_me():
     user = get_current_user()
-    return jsonify({'logged_in': False}) if not user else jsonify({'logged_in': True, 'user': user.to_dict()})
+    if user:
+        return jsonify({'logged_in': True, 'user': user.to_dict(), 'scope_key': f"user_{user.id}"})
+    return jsonify({'logged_in': False, 'scope_key': f"guest_{get_guest_session_id()}"})
 
 
 # --- PROJECTS ---
 
 @app.route('/api/projects', methods=['GET'])
 def get_projects():
-    return jsonify([p.to_dict() for p in Project.query.order_by(Project.updated_at.desc()).all()])
+    maybe_claim_legacy_projects()
+    user = get_current_user()
+    if user:
+        projects = Project.query.filter_by(user_id=user.id).order_by(Project.updated_at.desc()).all()
+    else:
+        projects = Project.query.filter_by(user_id=None, guest_session_id=get_guest_session_id()).order_by(Project.updated_at.desc()).all()
+    return jsonify([p.to_dict() for p in projects])
 
 
 @app.route('/api/projects/<int:project_id>/stats', methods=['GET'])
 def get_project_stats(project_id):
-    project     = Project.query.get_or_404(project_id)
+    project     = get_project_or_404(project_id)
     total_words = sum(len(html_to_plain_text(d.content or '').split()) for d in project.documents if d.content)
     scene_words = sum(len(html_to_plain_text(s.content or '').split()) for s in project.scenes if s.content)
     all_dates   = [project.updated_at] + [d.updated_at for d in project.documents]
@@ -376,12 +717,17 @@ def create_project():
     data = request.get_json()
     if not data or not data.get('title'):
         return jsonify({'error': 'Title required'}), 400
-    project = Project(title=data['title'], description=data.get('description', ''),
-                      genre=data.get('genre', 'general'))
+    user = get_current_user()
+    project = Project(
+        title=data['title'],
+        description=data.get('description', ''),
+        genre=data.get('genre', 'general'),
+        user_id=user.id if user else None,
+        guest_session_id='' if user else get_guest_session_id()
+    )
     db.session.add(project)
     db.session.commit()
 
-    user = get_current_user()
     if user and user.access_token:
         def _bg(app, pid, uid):
             with app.app_context():
@@ -389,11 +735,7 @@ def create_project():
                 if not u or not p: return
                 try:
                     drive = get_drive_service(u)
-                    if not u.scripvia_folder_id:
-                        u.scripvia_folder_id = get_or_create_folder(drive, 'Scripvia')
-                        db.session.commit()
-                    p.drive_folder_id = get_or_create_folder(drive, p.title, parent_id=u.scripvia_folder_id)
-                    db.session.commit()
+                    ensure_project_drive_structure(drive, u, p)
                 except Exception as e:
                     print(f"Drive folder error: {e}")
         drive_bg(_bg, app, project.id, user.id)
@@ -403,7 +745,7 @@ def create_project():
 
 @app.route('/api/projects/<int:project_id>', methods=['DELETE'])
 def delete_project(project_id):
-    project = Project.query.get_or_404(project_id)
+    project = get_project_or_404(project_id)
     folder_id = project.drive_folder_id
     db.session.delete(project)
     db.session.commit()
@@ -427,7 +769,7 @@ def delete_project(project_id):
 
 @app.route('/api/projects/<int:project_id>/documents', methods=['GET'])
 def get_documents(project_id):
-    Project.query.get_or_404(project_id)
+    get_project_or_404(project_id)
     docs = Document.query.filter_by(project_id=project_id).order_by(
         Document.order_index.asc(), Document.created_at.asc()).all()
     return jsonify([d.to_dict() for d in docs])
@@ -435,7 +777,7 @@ def get_documents(project_id):
 
 @app.route('/api/projects/<int:project_id>/documents/reorder', methods=['POST'])
 def reorder_documents(project_id):
-    Project.query.get_or_404(project_id)
+    get_project_or_404(project_id)
     data = request.get_json()
     if not data or 'order' not in data:
         return jsonify({'error': 'order required'}), 400
@@ -449,7 +791,7 @@ def reorder_documents(project_id):
 
 @app.route('/api/projects/<int:project_id>/documents', methods=['POST'])
 def create_document(project_id):
-    project = Project.query.get_or_404(project_id)
+    project = get_project_or_404(project_id)
     data    = request.get_json()
     if not data or not data.get('title'):
         return jsonify({'error': 'Title required'}), 400
@@ -468,14 +810,10 @@ def create_document(project_id):
                 if not u or not p or not d: return
                 try:
                     drive = get_drive_service(u)
-                    if not u.scripvia_folder_id:
-                        u.scripvia_folder_id = get_or_create_folder(drive, 'Scripvia')
-                        db.session.commit()
-                    if not p.drive_folder_id:
-                        p.drive_folder_id = get_or_create_folder(drive, p.title, parent_id=u.scripvia_folder_id)
-                        db.session.commit()
-                    d.drive_file_id = create_drive_file(
-                        drive, d.title, f"{d.title}\n{'='*len(d.title)}\n\n(empty)", p.drive_folder_id)
+                    folders = ensure_project_drive_structure(drive, u, p)
+                    d.drive_file_id = upsert_drive_text_file(
+                        drive, d.title, build_document_drive_content(d), folders['chapters'], d.drive_file_id
+                    )
                     db.session.commit()
                 except Exception as e:
                     print(f"Drive file error: {e}")
@@ -486,12 +824,15 @@ def create_document(project_id):
 
 @app.route('/api/documents/<int:doc_id>', methods=['GET'])
 def get_document(doc_id):
-    return jsonify(Document.query.get_or_404(doc_id).to_dict())
+    doc = Document.query.get_or_404(doc_id)
+    get_project_or_404(doc.project_id)
+    return jsonify(doc.to_dict())
 
 
 @app.route('/api/documents/<int:doc_id>', methods=['PUT'])
 def update_document(doc_id):
     doc  = Document.query.get_or_404(doc_id)
+    get_project_or_404(doc.project_id)
     data = request.get_json()
     if 'title'   in data: doc.title   = data['title']
     if 'content' in data: doc.content = data['content']
@@ -503,6 +844,7 @@ def update_document(doc_id):
 @app.route('/api/documents/<int:doc_id>', methods=['DELETE'])
 def delete_document(doc_id):
     doc = Document.query.get_or_404(doc_id)
+    get_project_or_404(doc.project_id)
     file_id = doc.drive_file_id
     db.session.delete(doc)
     db.session.commit()
@@ -513,10 +855,7 @@ def delete_document(doc_id):
             with app.app_context():
                 u = User.query.get(uid)
                 if not u: return
-                try:
-                    get_drive_service(u).files().delete(fileId=fid).execute()
-                except Exception as e:
-                    print(f"Drive delete error: {e}")
+                delete_drive_file_if_exists(get_drive_service(u), fid)
         drive_bg(_bg, app, file_id, user.id)
 
     return jsonify({'message': 'Deleted'})
@@ -526,13 +865,13 @@ def delete_document(doc_id):
 
 @app.route('/api/projects/<int:project_id>/characters', methods=['GET'])
 def get_characters(project_id):
-    Project.query.get_or_404(project_id)
+    get_project_or_404(project_id)
     return jsonify([c.to_dict() for c in Character.query.filter_by(project_id=project_id).order_by(Character.name).all()])
 
 
 @app.route('/api/projects/<int:project_id>/characters', methods=['POST'])
 def create_character(project_id):
-    Project.query.get_or_404(project_id)
+    get_project_or_404(project_id)
     data = request.get_json()
     if not data or not data.get('name'):
         return jsonify({'error': 'Name required'}), 400
@@ -541,6 +880,7 @@ def create_character(project_id):
                      backstory=data.get('backstory', ''), appearance=data.get('appearance', ''),
                      image_url=data.get('image_url', ''), image_focus=data.get('image_focus', 'center'),
                      extra_notes=data.get('extra_notes', ''))
+    char.set_titles(data.get('titles', []))
     db.session.add(char)
     db.session.commit()
 
@@ -552,15 +892,18 @@ def create_character(project_id):
                 if not u or not p or not c: return
                 try:
                     drive = get_drive_service(u)
-                    if not u.scripvia_folder_id:
-                        u.scripvia_folder_id = get_or_create_folder(drive, 'Scripvia')
-                        db.session.commit()
-                    if not p.drive_folder_id:
-                        p.drive_folder_id = get_or_create_folder(drive, p.title, parent_id=u.scripvia_folder_id)
-                        db.session.commit()
-                    folder = get_or_create_folder(drive, 'Characters', parent_id=p.drive_folder_id)
-                    content = f"Name: {c.name}\nRole: {c.role}\nAge: {c.age}\n\nAppearance:\n{c.appearance}\n\nPersonality:\n{c.personality}\n\nBackstory:\n{c.backstory}\n\nNotes:\n{c.extra_notes}"
-                    create_drive_file(drive, c.name, content, folder)
+                    folders = ensure_project_drive_structure(drive, u, p)
+                    folder = folders.get('characters')
+                    if not folder:
+                        return
+                    c.drive_file_id = upsert_drive_text_file(
+                        drive, c.name, build_character_drive_content(c), folder, c.drive_file_id
+                    )
+                    c.drive_image_file_id = upsert_drive_image_file(
+                        drive, c.name, c.image_url, folder, c.drive_image_file_id
+                    )
+                    sync_project_relationships_to_drive(u, p)
+                    db.session.commit()
                 except Exception as e:
                     print(f"Character Drive sync error: {e}")
         drive_bg(_bg, app, char.id, project_id, user.id)
@@ -570,24 +913,76 @@ def create_character(project_id):
 
 @app.route('/api/characters/<int:char_id>', methods=['GET'])
 def get_character(char_id):
-    return jsonify(Character.query.get_or_404(char_id).to_dict())
+    char = Character.query.get_or_404(char_id)
+    get_project_or_404(char.project_id)
+    return jsonify(char.to_dict())
 
 
 @app.route('/api/characters/<int:char_id>', methods=['PUT'])
 def update_character(char_id):
     char = Character.query.get_or_404(char_id)
+    get_project_or_404(char.project_id)
     data = request.get_json()
     for f in ['name','role','age','personality','backstory','appearance','image_url','image_focus','extra_notes']:
         if f in data: setattr(char, f, data[f])
+    if 'titles' in data:
+        char.set_titles(data.get('titles', []))
     db.session.commit()
+
+    user = get_current_user()
+    if user and user.access_token:
+        def _bg(app, cid, uid):
+            with app.app_context():
+                u, c = User.query.get(uid), Character.query.get(cid)
+                if not u or not c:
+                    return
+                p = Project.query.get(c.project_id)
+                if not p:
+                    return
+                try:
+                    drive = get_drive_service(u)
+                    folders = ensure_project_drive_structure(drive, u, p)
+                    folder = folders.get('characters')
+                    if not folder:
+                        return
+                    c.drive_file_id = upsert_drive_text_file(
+                        drive, c.name, build_character_drive_content(c), folder, c.drive_file_id
+                    )
+                    c.drive_image_file_id = upsert_drive_image_file(
+                        drive, c.name, c.image_url, folder, c.drive_image_file_id
+                    )
+                    sync_project_relationships_to_drive(u, p)
+                    db.session.commit()
+                except Exception as e:
+                    print(f"Character Drive update error: {e}")
+        drive_bg(_bg, app, char.id, user.id)
     return jsonify(char.to_dict())
 
 
 @app.route('/api/characters/<int:char_id>', methods=['DELETE'])
 def delete_character(char_id):
     char = Character.query.get_or_404(char_id)
+    get_project_or_404(char.project_id)
+    drive_file_id = char.drive_file_id
+    drive_image_file_id = char.drive_image_file_id
+    project_id = char.project_id
     db.session.delete(char)
     db.session.commit()
+
+    user = get_current_user()
+    if user and user.access_token:
+        def _bg(app, uid, pid, text_fid, image_fid):
+            with app.app_context():
+                u = User.query.get(uid)
+                p = Project.query.get(pid)
+                if not u:
+                    return
+                drive = get_drive_service(u)
+                delete_drive_file_if_exists(drive, text_fid)
+                delete_drive_file_if_exists(drive, image_fid)
+                if p:
+                    sync_project_relationships_to_drive(u, p)
+        drive_bg(_bg, app, user.id, project_id, drive_file_id, drive_image_file_id)
     return jsonify({'message': 'Deleted'})
 
 
@@ -595,13 +990,13 @@ def delete_character(char_id):
 
 @app.route('/api/projects/<int:project_id>/scenes', methods=['GET'])
 def get_scenes(project_id):
-    Project.query.get_or_404(project_id)
+    get_project_or_404(project_id)
     return jsonify([s.to_dict() for s in Scene.query.filter_by(project_id=project_id).order_by(Scene.updated_at.desc()).all()])
 
 
 @app.route('/api/projects/<int:project_id>/scenes', methods=['POST'])
 def create_scene(project_id):
-    Project.query.get_or_404(project_id)
+    get_project_or_404(project_id)
     data = request.get_json()
     if not data or not data.get('title'):
         return jsonify({'error': 'Title required'}), 400
@@ -618,15 +1013,14 @@ def create_scene(project_id):
                 if not u or not p or not s: return
                 try:
                     drive = get_drive_service(u)
-                    if not u.scripvia_folder_id:
-                        u.scripvia_folder_id = get_or_create_folder(drive, 'Scripvia')
-                        db.session.commit()
-                    if not p.drive_folder_id:
-                        p.drive_folder_id = get_or_create_folder(drive, p.title, parent_id=u.scripvia_folder_id)
-                        db.session.commit()
-                    folder  = get_or_create_folder(drive, 'Scenes', parent_id=p.drive_folder_id)
-                    content = f"Scene: {s.title}\nMood: {s.mood}\nConnected Chapter: {s.connected_chapter}\n\n{html_to_plain_text(s.content)}"
-                    create_drive_file(drive, s.title, content, folder)
+                    folders = ensure_project_drive_structure(drive, u, p)
+                    folder = folders.get('scenes')
+                    if not folder:
+                        return
+                    s.drive_file_id = upsert_drive_text_file(
+                        drive, s.title, build_scene_drive_content(s), folder, s.drive_file_id
+                    )
+                    db.session.commit()
                 except Exception as e:
                     print(f"Scene Drive sync error: {e}")
         drive_bg(_bg, app, scene.id, scene.project_id, user.id)
@@ -636,25 +1030,64 @@ def create_scene(project_id):
 
 @app.route('/api/scenes/<int:scene_id>', methods=['GET'])
 def get_scene(scene_id):
-    return jsonify(Scene.query.get_or_404(scene_id).to_dict())
+    scene = Scene.query.get_or_404(scene_id)
+    get_project_or_404(scene.project_id)
+    return jsonify(scene.to_dict())
 
 
 @app.route('/api/scenes/<int:scene_id>', methods=['PUT'])
 def update_scene(scene_id):
     scene = Scene.query.get_or_404(scene_id)
+    get_project_or_404(scene.project_id)
     data  = request.get_json()
     for f in ['title','content','mood','connected_chapter']:
         if f in data: setattr(scene, f, data[f])
     scene.updated_at = datetime.utcnow()
     db.session.commit()
+
+    user = get_current_user()
+    if user and user.access_token:
+        def _bg(app, sid, uid):
+            with app.app_context():
+                u, s = User.query.get(uid), Scene.query.get(sid)
+                if not u or not s:
+                    return
+                p = Project.query.get(s.project_id)
+                if not p:
+                    return
+                try:
+                    drive = get_drive_service(u)
+                    folders = ensure_project_drive_structure(drive, u, p)
+                    folder = folders.get('scenes')
+                    if not folder:
+                        return
+                    s.drive_file_id = upsert_drive_text_file(
+                        drive, s.title, build_scene_drive_content(s), folder, s.drive_file_id
+                    )
+                    db.session.commit()
+                except Exception as e:
+                    print(f"Scene Drive update error: {e}")
+        drive_bg(_bg, app, scene.id, user.id)
     return jsonify(scene.to_dict())
 
 
 @app.route('/api/scenes/<int:scene_id>', methods=['DELETE'])
 def delete_scene(scene_id):
     scene = Scene.query.get_or_404(scene_id)
+    get_project_or_404(scene.project_id)
+    drive_file_id = scene.drive_file_id
     db.session.delete(scene)
     db.session.commit()
+
+    user = get_current_user()
+    if user and user.access_token and drive_file_id:
+        def _bg(app, uid, fid):
+            with app.app_context():
+                u = User.query.get(uid)
+                if not u:
+                    return
+                delete_drive_file_if_exists(get_drive_service(u), fid)
+        drive_bg(_bg, app, user.id, drive_file_id)
     return jsonify({'message': 'Deleted'})
 
 
@@ -662,13 +1095,13 @@ def delete_scene(scene_id):
 
 @app.route('/api/projects/<int:project_id>/lore', methods=['GET'])
 def get_lore(project_id):
-    Project.query.get_or_404(project_id)
+    get_project_or_404(project_id)
     return jsonify([i.to_dict() for i in LoreItem.query.filter_by(project_id=project_id).order_by(LoreItem.name).all()])
 
 
 @app.route('/api/projects/<int:project_id>/lore', methods=['POST'])
 def create_lore(project_id):
-    Project.query.get_or_404(project_id)
+    get_project_or_404(project_id)
     data = request.get_json()
     if not data or not data.get('name'):
         return jsonify({'error': 'Name required'}), 400
@@ -686,15 +1119,17 @@ def create_lore(project_id):
                 if not u or not p or not l: return
                 try:
                     drive = get_drive_service(u)
-                    if not u.scripvia_folder_id:
-                        u.scripvia_folder_id = get_or_create_folder(drive, 'Scripvia')
-                        db.session.commit()
-                    if not p.drive_folder_id:
-                        p.drive_folder_id = get_or_create_folder(drive, p.title, parent_id=u.scripvia_folder_id)
-                        db.session.commit()
-                    folder  = get_or_create_folder(drive, 'Lore', parent_id=p.drive_folder_id)
-                    content = f"Name: {l.name}\nCategory: {l.category}\n\nDescription:\n{l.description}\n\nNotes:\n{l.extra_notes}"
-                    create_drive_file(drive, l.name, content, folder)
+                    folders = ensure_project_drive_structure(drive, u, p)
+                    folder = folders.get('lore')
+                    if not folder:
+                        return
+                    l.drive_file_id = upsert_drive_text_file(
+                        drive, l.name, build_lore_drive_content(l), folder, l.drive_file_id
+                    )
+                    l.drive_image_file_id = upsert_drive_image_file(
+                        drive, l.name, l.image_url, folder, l.drive_image_file_id
+                    )
+                    db.session.commit()
                 except Exception as e:
                     print(f"Lore Drive sync error: {e}")
         drive_bg(_bg, app, item.id, item.project_id, user.id)
@@ -704,24 +1139,69 @@ def create_lore(project_id):
 
 @app.route('/api/lore/<int:item_id>', methods=['GET'])
 def get_lore_item(item_id):
-    return jsonify(LoreItem.query.get_or_404(item_id).to_dict())
+    item = LoreItem.query.get_or_404(item_id)
+    get_project_or_404(item.project_id)
+    return jsonify(item.to_dict())
 
 
 @app.route('/api/lore/<int:item_id>', methods=['PUT'])
 def update_lore_item(item_id):
     item = LoreItem.query.get_or_404(item_id)
+    get_project_or_404(item.project_id)
     data = request.get_json()
     for f in ['name','category','description','image_url','extra_notes']:
         if f in data: setattr(item, f, data[f])
     db.session.commit()
+
+    user = get_current_user()
+    if user and user.access_token:
+        def _bg(app, iid, uid):
+            with app.app_context():
+                u, l = User.query.get(uid), LoreItem.query.get(iid)
+                if not u or not l:
+                    return
+                p = Project.query.get(l.project_id)
+                if not p:
+                    return
+                try:
+                    drive = get_drive_service(u)
+                    folders = ensure_project_drive_structure(drive, u, p)
+                    folder = folders.get('lore')
+                    if not folder:
+                        return
+                    l.drive_file_id = upsert_drive_text_file(
+                        drive, l.name, build_lore_drive_content(l), folder, l.drive_file_id
+                    )
+                    l.drive_image_file_id = upsert_drive_image_file(
+                        drive, l.name, l.image_url, folder, l.drive_image_file_id
+                    )
+                    db.session.commit()
+                except Exception as e:
+                    print(f"Lore Drive update error: {e}")
+        drive_bg(_bg, app, item.id, user.id)
     return jsonify(item.to_dict())
 
 
 @app.route('/api/lore/<int:item_id>', methods=['DELETE'])
 def delete_lore_item(item_id):
     item = LoreItem.query.get_or_404(item_id)
+    get_project_or_404(item.project_id)
+    drive_file_id = item.drive_file_id
+    drive_image_file_id = item.drive_image_file_id
     db.session.delete(item)
     db.session.commit()
+
+    user = get_current_user()
+    if user and user.access_token:
+        def _bg(app, uid, text_fid, image_fid):
+            with app.app_context():
+                u = User.query.get(uid)
+                if not u:
+                    return
+                drive = get_drive_service(u)
+                delete_drive_file_if_exists(drive, text_fid)
+                delete_drive_file_if_exists(drive, image_fid)
+        drive_bg(_bg, app, user.id, drive_file_id, drive_image_file_id)
     return jsonify({'message': 'Deleted'})
 
 
@@ -729,7 +1209,7 @@ def delete_lore_item(item_id):
 
 @app.route('/api/projects/<int:project_id>/notes', methods=['GET'])
 def get_notes(project_id):
-    Project.query.get_or_404(project_id)
+    get_project_or_404(project_id)
     note = Note.query.filter_by(project_id=project_id).first()
     if not note:
         note = Note(project_id=project_id, content='')
@@ -740,7 +1220,7 @@ def get_notes(project_id):
 
 @app.route('/api/projects/<int:project_id>/notes', methods=['PUT'])
 def update_notes(project_id):
-    Project.query.get_or_404(project_id)
+    get_project_or_404(project_id)
     note = Note.query.filter_by(project_id=project_id).first()
     if not note:
         note = Note(project_id=project_id, content='')
@@ -786,13 +1266,13 @@ def update_notes(project_id):
 
 @app.route('/api/projects/<int:project_id>/relationships', methods=['GET'])
 def get_relationships(project_id):
-    Project.query.get_or_404(project_id)
+    get_project_or_404(project_id)
     return jsonify([r.to_dict() for r in CharacterRelationship.query.filter_by(project_id=project_id).all()])
 
 
 @app.route('/api/projects/<int:project_id>/relationships', methods=['POST'])
 def create_relationship(project_id):
-    Project.query.get_or_404(project_id)
+    get_project_or_404(project_id)
     data = request.get_json()
     if not data or not data.get('char_a_id') or not data.get('char_b_id'):
         return jsonify({'error': 'Both characters required'}), 400
@@ -803,24 +1283,72 @@ def create_relationship(project_id):
                                 description=data.get('description', ''), color=data.get('color', '#7b6fb0'))
     db.session.add(rel)
     db.session.commit()
+
+    user = get_current_user()
+    if user and user.access_token:
+        def _bg(app, pid, uid):
+            with app.app_context():
+                u = User.query.get(uid)
+                p = Project.query.get(pid)
+                if not u or not p:
+                    return
+                try:
+                    sync_project_relationships_to_drive(u, p)
+                except Exception as e:
+                    print(f"Relationship Drive sync error: {e}")
+        drive_bg(_bg, app, project_id, user.id)
     return jsonify(rel.to_dict()), 201
 
 
 @app.route('/api/relationships/<int:rel_id>', methods=['PUT'])
 def update_relationship(rel_id):
     rel  = CharacterRelationship.query.get_or_404(rel_id)
+    get_project_or_404(rel.project_id)
     data = request.get_json()
     for f in ['relation_type','description','color']:
         if f in data: setattr(rel, f, data[f])
     db.session.commit()
+
+    user = get_current_user()
+    if user and user.access_token:
+        def _bg(app, rid, uid):
+            with app.app_context():
+                u = User.query.get(uid)
+                r = CharacterRelationship.query.get(rid)
+                if not u or not r:
+                    return
+                p = Project.query.get(r.project_id)
+                if not p:
+                    return
+                try:
+                    sync_project_relationships_to_drive(u, p)
+                except Exception as e:
+                    print(f"Relationship Drive update error: {e}")
+        drive_bg(_bg, app, rel.id, user.id)
     return jsonify(rel.to_dict())
 
 
 @app.route('/api/relationships/<int:rel_id>', methods=['DELETE'])
 def delete_relationship(rel_id):
     rel = CharacterRelationship.query.get_or_404(rel_id)
+    get_project_or_404(rel.project_id)
+    project_id = rel.project_id
     db.session.delete(rel)
     db.session.commit()
+
+    user = get_current_user()
+    if user and user.access_token:
+        def _bg(app, pid, uid):
+            with app.app_context():
+                u = User.query.get(uid)
+                p = Project.query.get(pid)
+                if not u or not p:
+                    return
+                try:
+                    sync_project_relationships_to_drive(u, p)
+                except Exception as e:
+                    print(f"Relationship Drive delete sync error: {e}")
+        drive_bg(_bg, app, project_id, user.id)
     return jsonify({'message': 'Deleted'})
 
 
@@ -828,7 +1356,7 @@ def delete_relationship(rel_id):
 
 @app.route('/api/projects/<int:project_id>/search', methods=['GET'])
 def search_project(project_id):
-    Project.query.get_or_404(project_id)
+    get_project_or_404(project_id)
     q = request.args.get('q', '').strip().lower()
     if not q or len(q) < 2:
         return jsonify([])
@@ -861,16 +1389,40 @@ def search_project(project_id):
     return jsonify(results)
 
 
+@app.route('/api/projects/<int:project_id>/drive-sync-all', methods=['POST'])
+def sync_project_drive_contents(project_id):
+    user = get_current_user()
+    if not user or not user.access_token:
+        return jsonify({'error': 'Not logged in'}), 401
+    project = get_project_or_404(project_id)
+
+    def _bg(app, pid, uid):
+        with app.app_context():
+            u = User.query.get(uid)
+            p = Project.query.get(pid)
+            if not u or not p:
+                return
+            try:
+                sync_full_project_to_drive(u, p)
+            except Exception as e:
+                print(f"Project Drive sync error: {e}")
+
+    drive_bg(_bg, app, project.id, user.id)
+    return jsonify({'queued': True})
+
+
 # --- WIKI ---
 
 @app.route('/api/projects/<int:project_id>/wiki', methods=['GET'])
 def get_wiki_data(project_id):
+    get_project_or_404(project_id)
     chars = Character.query.filter_by(project_id=project_id).all()
     lore  = LoreItem.query.filter_by(project_id=project_id).all()
     wiki  = {}
     for c in chars:
         wiki[c.name.lower()] = {
             'type': 'character', 'name': c.name, 'role': c.role, 'age': c.age,
+            'titles': c.get_titles(),
             'image_url': c.image_url, 'id': c.id, 'image_focus': c.image_focus,
             'summary':    c.personality[:200] + '...' if len(c.personality) > 200 else c.personality,
             'backstory':  c.backstory[:200]   + '...' if len(c.backstory)   > 200 else c.backstory,
@@ -893,24 +1445,18 @@ def sync_to_drive(doc_id):
     if not user or not user.access_token:
         return jsonify({'error': 'Not logged in'}), 401
     doc     = Document.query.get_or_404(doc_id)
-    project = Project.query.get_or_404(doc.project_id)
+    project = get_project_or_404(doc.project_id)
     try:
-        drive = get_drive_service(user)
-        if not user.scripvia_folder_id:
-            user.scripvia_folder_id = get_or_create_folder(drive, 'Scripvia')
-            db.session.commit()
-        if not project.drive_folder_id:
-            project.drive_folder_id = get_or_create_folder(drive, project.title, parent_id=user.scripvia_folder_id)
-            db.session.commit()
-        text = f"{doc.title}\n{'='*len(doc.title)}\n\n{html_to_plain_text(doc.content or '')}"
-        if doc.drive_file_id:
-            update_drive_file(drive, doc.drive_file_id, doc.title, text)
-            action = 'updated'
-        else:
-            doc.drive_file_id = create_drive_file(drive, doc.title, text, project.drive_folder_id)
-            db.session.commit()
-            action = 'created'
-        return jsonify({'success': True, 'action': action})
+        had_drive_file = bool(doc.drive_file_id)
+        sync_full_project_to_drive(user, project)
+        db.session.refresh(doc)
+        action = 'updated' if had_drive_file and doc.drive_file_id else 'created'
+        return jsonify({
+            'success': True,
+            'action': action,
+            'project_folder_id': project.drive_folder_id,
+            'document_drive_file_id': doc.drive_file_id
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -918,6 +1464,7 @@ def sync_to_drive(doc_id):
 @app.route('/api/documents/<int:doc_id>/sync-status', methods=['GET'])
 def sync_status(doc_id):
     doc = Document.query.get_or_404(doc_id)
+    get_project_or_404(doc.project_id)
     return jsonify({'synced': bool(doc.drive_file_id), 'drive_file_id': doc.drive_file_id})
 
 
@@ -927,7 +1474,7 @@ def sync_status(doc_id):
 def export_pdf(doc_id):
     from reportlab.lib.enums import TA_LEFT
     doc     = Document.query.get_or_404(doc_id)
-    project = Project.query.get_or_404(doc.project_id)
+    project = get_project_or_404(doc.project_id)
     buffer  = io.BytesIO()
     styles  = getSampleStyleSheet()
 
@@ -969,7 +1516,7 @@ def export_pdf(doc_id):
 @app.route('/api/documents/<int:doc_id>/export/docx', methods=['GET'])
 def export_docx(doc_id):
     doc     = Document.query.get_or_404(doc_id)
-    project = Project.query.get_or_404(doc.project_id)
+    project = get_project_or_404(doc.project_id)
     word    = DocxDocument()
     section = word.sections[0]
     section.top_margin = section.bottom_margin = Inches(1.2)
@@ -1017,7 +1564,7 @@ def export_docx(doc_id):
 
 @app.route('/api/projects/<int:project_id>/export/pdf', methods=['GET'])
 def export_project_pdf(project_id):
-    project = Project.query.get_or_404(project_id)
+    project = get_project_or_404(project_id)
     docs    = Document.query.filter_by(project_id=project_id).order_by(
         Document.order_index.asc(), Document.created_at.asc()).all()
     buffer  = io.BytesIO()
@@ -1074,7 +1621,7 @@ def export_project_pdf(project_id):
 
 @app.route('/api/projects/<int:project_id>/export/docx', methods=['GET'])
 def export_project_docx(project_id):
-    project = Project.query.get_or_404(project_id)
+    project = get_project_or_404(project_id)
     docs    = Document.query.filter_by(project_id=project_id).order_by(
         Document.order_index.asc(), Document.created_at.asc()).all()
     docx    = DocxDocument()
@@ -1141,10 +1688,41 @@ def export_project_docx(project_id):
                      mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
 
 
+def ensure_character_titles_column():
+    engine = db.engine
+    if engine.url.get_backend_name() != 'sqlite':
+        return
+    with engine.begin() as conn:
+        required_columns = {
+            'project': {
+                'guest_session_id': "VARCHAR(200) DEFAULT ''"
+            },
+            'character': {
+                'titles': "TEXT DEFAULT '[]'",
+                'drive_file_id': "VARCHAR(200) DEFAULT ''",
+                'drive_image_file_id': "VARCHAR(200) DEFAULT ''"
+            },
+            'scene': {
+                'drive_file_id': "VARCHAR(200) DEFAULT ''"
+            },
+            'lore_item': {
+                'drive_file_id': "VARCHAR(200) DEFAULT ''",
+                'drive_image_file_id': "VARCHAR(200) DEFAULT ''"
+            }
+        }
+        for table_name, columns in required_columns.items():
+            cols = conn.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()
+            col_names = {col[1] for col in cols}
+            for column_name, column_def in columns.items():
+                if column_name not in col_names:
+                    conn.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_def}")
+
+
 # --- ENTRY POINT ---
 
 if __name__ == '__main__':
     with app.app_context():
+        ensure_character_titles_column()
         print("Starting app... DB will be created fresh if not exists.")
     print("Scripvia running at http://localhost:5000")
     app.run(debug=False, use_reloader=False)

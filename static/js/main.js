@@ -12,6 +12,8 @@ let secondsUntilSave = 30;
 let pendingSync = false;
 let openTabs = [];
 let wikiData = {};
+let currentCharacters = [];
+let storageScopeKey = 'guest_default';
 
 // --- DOM REFS ---
 const projectsList = document.getElementById('projectsList');
@@ -202,7 +204,7 @@ function renderProjects(projects) {
     }
     projectsList.innerHTML = projects.map(p => `
         <li class="project-item ${p.id === currentProjectId ? 'active' : ''}" onclick="selectProject(${p.id})">
-            <span class="item-name">${escapeHtml(p.title)}</span>
+            <span class="item-name" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</span>
             <span class="item-meta">${genreEmoji(p.genre)}</span>
             <button class="item-delete" onclick="deleteProject(event,${p.id})">×</button>
         </li>`).join('');
@@ -245,6 +247,7 @@ async function selectProject(id) {
         currentProjectId = id;
         const projects = await api('GET', '/api/projects');
         currentProjectData = projects.find(p => p.id === id);
+        api('POST', `/api/projects/${id}/drive-sync-all`).catch(e => console.error('projectDriveSync:', e));
         showProjectDetail();
         currentProjectName.textContent = currentProjectData.title;
         await showProjectOverview(id);
@@ -363,7 +366,7 @@ function renderDocuments(docs) {
             ondragstart="onDragStart(event)" ondragover="onDragOver(event)"
             ondragend="onDragEnd(event)" ondrop="onDrop(event)">
             <span class="drag-handle" title="Drag to reorder">⠿</span>
-            <span class="item-name">${escapeHtml(d.title)}</span>
+            <span class="item-name" title="${escapeHtml(d.title)}">${escapeHtml(d.title)}</span>
             <button class="item-delete" onclick="deleteDocument(event,${d.id})">×</button>
         </li>`).join('');
 }
@@ -460,8 +463,19 @@ async function saveDocument() {
         if (currentDocType === 'scene') await loadScenes(currentProjectId);
         if (navigator.onLine && currentDocType === 'chapter') {
             setSaveStatus('syncing');
-            try { await api('POST', `/api/documents/${currentDocId}/sync`); setSaveStatus('synced'); setTimeout(() => setSaveStatus('saved'), 2000); }
-            catch (e) { setSaveStatus('saved'); }
+            try {
+                await api('POST', `/api/documents/${currentDocId}/sync`);
+                if (currentProjectId) {
+                    await api('POST', `/api/projects/${currentProjectId}/drive-sync-all`);
+                }
+                setSaveStatus('synced');
+                setTimeout(() => setSaveStatus('saved'), 2000);
+            }
+            catch (e) {
+                setSaveStatus('error');
+                console.error('driveSync:', e);
+                alert('Drive sync failed. Please try again after restarting the app.');
+            }
         } else {
             setSaveStatus('saved');
             if (!navigator.onLine) pendingSync = true;
@@ -487,13 +501,76 @@ async function loadCharacters(projectId) {
 }
 
 function renderCharacters(chars) {
+    currentCharacters = chars;
     if (!chars.length) { charactersList.innerHTML = '<li class="empty-state">No characters yet.</li>'; return; }
     charactersList.innerHTML = chars.map(c => `
-        <li class="item-list-entry" onclick="openEditCharModal(${c.id})">
-            <span class="item-name">${escapeHtml(c.name)}</span>
+        <li class="item-list-entry character-list-entry" data-char-id="${c.id}" onclick="openEditCharModal(${c.id})">
+            <span class="item-name" title="${escapeHtml(c.name)}">${escapeHtml(c.name)}</span>
             ${c.role ? `<span class="item-badge">${escapeHtml(c.role)}</span>` : ''}
             <button class="item-delete" onclick="deleteCharacter(event,${c.id})">×</button>
         </li>`).join('');
+    attachCharacterListHoverTooltips();
+}
+
+function attachCharacterListHoverTooltips() {
+    charactersList.querySelectorAll('.character-list-entry').forEach(item => {
+        item.addEventListener('mouseenter', handleCharacterListHover);
+        item.addEventListener('mousemove', handleCharacterListHover);
+        item.addEventListener('mouseleave', hideWikiTooltip);
+    });
+}
+
+function handleCharacterListHover(e) {
+    const item = e.currentTarget;
+    const charId = parseInt(item.dataset.charId, 10);
+    const character = currentCharacters.find(c => c.id === charId);
+    if (!character) return;
+    showCharacterHoverTooltip(character, e.clientX, e.clientY, { compact: true });
+}
+
+function ensureCharacterTitlesUI() {
+    if (document.getElementById('charTitlesSection')) return;
+    const nameInput = document.getElementById('charNameInput');
+    if (!nameInput) return;
+    nameInput.insertAdjacentHTML('afterend', `
+        <label class="modal-label" id="charTitlesLabel">Titles <span class="optional">(optional)</span></label>
+        <div class="char-titles-section" id="charTitlesSection">
+            <div class="char-title-list" id="charTitlesList"></div>
+            <button type="button" class="btn-ghost-sm char-title-add" id="addCharTitleBtn">+ Add title</button>
+        </div>
+    `);
+    document.getElementById('addCharTitleBtn').addEventListener('click', () => addCharacterTitleInput(''));
+    addCharacterTitleInput('');
+}
+
+function addCharacterTitleInput(value = '') {
+    const list = document.getElementById('charTitlesList');
+    if (!list) return;
+    const row = document.createElement('div');
+    row.className = 'char-title-row';
+    row.innerHTML = `
+        <input type="text" class="modal-input char-title-input" placeholder="e.g. Crown Prince, Captain..." value="${escapeHtml(value)}">
+        <button type="button" class="btn-ghost-sm char-title-remove" aria-label="Remove title">×</button>
+    `;
+    row.querySelector('.char-title-remove').addEventListener('click', () => {
+        row.remove();
+        if (!list.children.length) addCharacterTitleInput('');
+    });
+    list.appendChild(row);
+}
+
+function getCharacterTitles() {
+    return Array.from(document.querySelectorAll('.char-title-input'))
+        .map(input => input.value.trim())
+        .filter(Boolean);
+}
+
+function setCharacterTitles(titles = []) {
+    const list = document.getElementById('charTitlesList');
+    if (!list) return;
+    list.innerHTML = '';
+    const values = Array.isArray(titles) && titles.length ? titles : [''];
+    values.forEach(title => addCharacterTitleInput(title));
 }
 
 async function createCharacter() {
@@ -502,6 +579,7 @@ async function createCharacter() {
     try {
         await api('POST', `/api/projects/${currentProjectId}/characters`, {
             name, role: document.getElementById('charRoleInput').value,
+            titles: getCharacterTitles(),
             age: document.getElementById('charAgeInput').value.trim(),
             appearance: document.getElementById('charAppearanceInput').value.trim(),
             personality: document.getElementById('charPersonalityInput').value.trim(),
@@ -510,8 +588,7 @@ async function createCharacter() {
             image_focus: 'center'
         });
         closeModal(newCharModal);
-        ['charNameInput', 'charAgeInput', 'charAppearanceInput', 'charPersonalityInput', 'charBackstoryInput', 'charImageInput'].forEach(id => document.getElementById(id).value = '');
-        document.getElementById('charRoleInput').value = '';
+        resetCharModal();
         await loadCharacters(currentProjectId);
         await loadWikiData(currentProjectId);
     } catch (e) { console.error('createCharacter:', e); }
@@ -530,6 +607,7 @@ async function openEditCharModal(id) {
         const c = await api('GET', `/api/characters/${id}`);
         document.getElementById('charNameInput').value = c.name || '';
         document.getElementById('charRoleInput').value = c.role || '';
+        setCharacterTitles(c.titles || []);
         document.getElementById('charAgeInput').value = c.age || '';
         document.getElementById('charAppearanceInput').value = c.appearance || '';
         document.getElementById('charPersonalityInput').value = c.personality || '';
@@ -553,6 +631,7 @@ async function saveEditChar(id) {
     try {
         await api('PUT', `/api/characters/${id}`, {
             name, role: document.getElementById('charRoleInput').value,
+            titles: getCharacterTitles(),
             age: document.getElementById('charAgeInput').value.trim(),
             appearance: document.getElementById('charAppearanceInput').value.trim(),
             personality: document.getElementById('charPersonalityInput').value.trim(),
@@ -704,6 +783,7 @@ function resetCharModal() {
     delete btn.dataset.mode;
     document.getElementById('charNameInput').value = '';
     document.getElementById('charRoleInput').value = '';
+    setCharacterTitles([]);
     document.getElementById('charAgeInput').value = '';
     document.getElementById('charAppearanceInput').value = '';
     document.getElementById('charPersonalityInput').value = '';
@@ -730,7 +810,7 @@ function renderScenes(scenes) {
     if (!scenes.length) { scenesList.innerHTML = '<li class="empty-state">No scenes yet.</li>'; return; }
     scenesList.innerHTML = scenes.map(s => `
         <li class="item-list-entry ${s.id === currentDocId && currentDocType === 'scene' ? 'active' : ''}" onclick="openDocument(${s.id},'scene')">
-            <span class="item-name">${escapeHtml(s.title)}</span>
+            <span class="item-name" title="${escapeHtml(s.title)}">${escapeHtml(s.title)}</span>
             ${s.mood ? `<span class="item-badge">${moodEmoji[s.mood] || ''} ${s.mood}</span>` : ''}
             <button class="item-delete" onclick="deleteScene(event,${s.id})">×</button>
         </li>`).join('');
@@ -769,7 +849,7 @@ function renderLore(items) {
     if (!items.length) { loreList.innerHTML = '<li class="empty-state">No lore entries yet.</li>'; return; }
     loreList.innerHTML = items.map(i => `
         <li class="item-list-entry" onclick="openEditLoreModal(${i.id})">
-            <span class="item-name">${escapeHtml(i.name)}</span>
+            <span class="item-name" title="${escapeHtml(i.name)}">${escapeHtml(i.name)}</span>
             <span class="item-badge">${catEmoji[i.category] || '📌'}</span>
             <button class="item-delete" onclick="deleteLore(event,${i.id})">×</button>
         </li>`).join('');
@@ -857,6 +937,7 @@ async function loadWikiData(projectId) {
 }
 
 let wikiHoverTimer = null;
+let activeTooltipSignature = '';
 
 function handleWikiHover(e) {
     if (!wikiData || !Object.keys(wikiData).length) return;
@@ -996,6 +1077,313 @@ function showWikiTooltip(key, x, y) {
 }
 
 function hideWikiTooltip() { wikiTooltip.style.display = 'none'; }
+
+function ensureWikiTooltipLayout() {
+    const cardContent = wikiTooltip.querySelector('.wiki-card-content');
+    if (!cardContent || document.getElementById('wikiCardFlow')) return;
+
+    const imgWrap = document.getElementById('wikiCardImgWrap');
+    const header = cardContent.querySelector('.wiki-card-header');
+    const body = document.getElementById('wikiCardBody');
+    if (!imgWrap || !header || !body) return;
+
+    cardContent.innerHTML = `
+        <div class="wiki-card-flow" id="wikiCardFlow">
+            ${imgWrap.outerHTML}
+            ${header.outerHTML}
+            <div class="wiki-card-body" id="wikiCardBodyFlow"></div>
+        </div>
+    `;
+}
+
+function clearWikiHoverTimer() {
+    if (wikiHoverTimer) {
+        clearTimeout(wikiHoverTimer);
+        wikiHoverTimer = null;
+    }
+}
+
+let activeWikiHoverKey = null;
+let activeWikiHoverToken = 0;
+const WIKI_TOOLTIP_HOVER_DELAY_MS = 500;
+
+function getWikiMatchAtPoint(clientX, clientY) {
+    if (!wikiData || !Object.keys(wikiData).length) return null;
+
+    let range;
+    try {
+        if (document.caretRangeFromPoint) {
+            range = document.caretRangeFromPoint(clientX, clientY);
+        } else if (document.caretPositionFromPoint) {
+            const pos = document.caretPositionFromPoint(clientX, clientY);
+            if (!pos) return null;
+            range = document.createRange();
+            range.setStart(pos.offsetNode, pos.offset);
+            range.setEnd(pos.offsetNode, pos.offset);
+        }
+        if (!range) return null;
+        range.expand('word');
+    } catch (e) { return null; }
+
+    const sortedKeys = Object.keys(wikiData).sort((a, b) => b.length - a.length);
+    const textNode = range.startContainer;
+    const paraText = textNode?.textContent || '';
+    const paraTextLower = paraText.toLowerCase();
+    const caretOffset = range.startOffset;
+
+    if (!paraTextLower.trim()) return null;
+
+    for (const key of sortedKeys) {
+        const searchKey = key.toLowerCase();
+        let matchIndex = paraTextLower.indexOf(searchKey);
+
+        while (matchIndex !== -1) {
+            const matchEnd = matchIndex + searchKey.length;
+            const beforeChar = matchIndex > 0 ? paraTextLower[matchIndex - 1] : '';
+            const afterChar = matchEnd < paraTextLower.length ? paraTextLower[matchEnd] : '';
+            const startsAtBoundary = !beforeChar || !/[a-z0-9_]/i.test(beforeChar);
+            const endsAtBoundary = !afterChar || !/[a-z0-9_]/i.test(afterChar);
+            const isInsideMatch = caretOffset >= matchIndex && caretOffset <= matchEnd;
+
+            if (startsAtBoundary && endsAtBoundary && isInsideMatch && textNode?.nodeType === Node.TEXT_NODE) {
+                const matchRange = document.createRange();
+                matchRange.setStart(textNode, matchIndex);
+                matchRange.setEnd(textNode, matchEnd);
+                const rects = Array.from(matchRange.getClientRects());
+                const isOverExactMatch = rects.some(rect =>
+                    clientX >= rect.left &&
+                    clientX <= rect.right &&
+                    clientY >= rect.top &&
+                    clientY <= rect.bottom
+                );
+
+                if (isOverExactMatch) return { key, x: clientX, y: clientY };
+            }
+
+            matchIndex = paraTextLower.indexOf(searchKey, matchIndex + 1);
+        }
+    }
+
+    return null;
+}
+
+function handleWikiHover(e) {
+    const match = getWikiMatchAtPoint(e.clientX, e.clientY);
+    if (!match) {
+        activeWikiHoverKey = null;
+        activeWikiHoverToken += 1;
+        clearWikiHoverTimer();
+        hideWikiTooltip();
+        return;
+    }
+
+    if (activeWikiHoverKey === match.key && wikiTooltip.style.display === 'block') return;
+
+    activeWikiHoverToken += 1;
+    const hoverToken = activeWikiHoverToken;
+    activeWikiHoverKey = match.key;
+    clearWikiHoverTimer();
+    wikiHoverTimer = setTimeout(() => {
+        const confirmedMatch = getWikiMatchAtPoint(match.x, match.y);
+        if (!confirmedMatch || confirmedMatch.key !== match.key || hoverToken !== activeWikiHoverToken) return;
+        showWikiTooltip(match.key, confirmedMatch.x, confirmedMatch.y);
+    }, WIKI_TOOLTIP_HOVER_DELAY_MS);
+}
+
+function showWikiTooltip(key, x, y) {
+    const entry = wikiData[key];
+    if (!entry) return;
+    const signature = `wiki:${key}`;
+    if (activeTooltipSignature !== signature || wikiTooltip.style.display !== 'block') {
+        if (!renderTooltipCard(buildWikiTooltipEntry(entry))) return;
+        activeTooltipSignature = signature;
+        wikiTooltip.style.visibility = 'hidden';
+        wikiTooltip.style.display = 'block';
+    }
+    positionWikiTooltip(x, y);
+    wikiTooltip.style.visibility = 'visible';
+}
+
+function hideWikiTooltip() {
+    clearWikiHoverTimer();
+    activeWikiHoverKey = null;
+    activeWikiHoverToken += 1;
+    activeTooltipSignature = '';
+    wikiTooltip.classList.remove('compact');
+    wikiTooltip.style.display = 'none';
+}
+
+function positionWikiTooltip(x, y) {
+    const cW = wikiTooltip.offsetWidth || 360;
+    const cH = wikiTooltip.offsetHeight || 420;
+    let left = x + 18;
+    let top = y - 36;
+    if (left + cW > window.innerWidth - 16) left = x - cW - 18;
+    if (top + cH > window.innerHeight - 16) top = window.innerHeight - cH - 16;
+    if (top < 10) top = 10;
+    if (left < 10) left = 10;
+    wikiTooltip.style.left = `${left}px`;
+    wikiTooltip.style.top = `${top}px`;
+}
+
+function renderTooltipCard(entry, { compact = false } = {}) {
+    ensureWikiTooltipLayout();
+
+    const flowEl = document.getElementById('wikiCardFlow');
+    const imgEl = flowEl ? flowEl.querySelector('#wikiTooltipImgEl') : null;
+    const imgWrap = flowEl ? flowEl.querySelector('#wikiCardImgWrap') : null;
+    const nameEl = flowEl ? flowEl.querySelector('#wikiTooltipName') : document.getElementById('wikiTooltipName');
+    const typeEl = flowEl ? flowEl.querySelector('#wikiTooltipType') : document.getElementById('wikiTooltipType');
+    let titlesEl = flowEl ? flowEl.querySelector('#wikiTooltipTitles') : null;
+    const bodyEl = document.getElementById('wikiCardBodyFlow');
+    if (!flowEl || !imgEl || !imgWrap || !bodyEl) return false;
+    if (!titlesEl) {
+        typeEl.insertAdjacentHTML('afterend', '<div class="wiki-card-titles" id="wikiTooltipTitles"></div>');
+        titlesEl = flowEl.querySelector('#wikiTooltipTitles');
+    }
+
+    wikiTooltip.classList.toggle('compact', compact);
+    nameEl.textContent = entry.name || '';
+    typeEl.textContent = entry.meta || '';
+    titlesEl.textContent = entry.titlesText || '';
+    titlesEl.style.display = entry.titlesText ? 'block' : 'none';
+
+    if (entry.image_url) {
+        flowEl.classList.remove('no-image');
+        imgEl.onload = () => { imgEl.style.objectPosition = 'center center'; };
+        imgEl.onerror = () => {
+            flowEl.classList.add('no-image');
+            imgWrap.style.display = 'none';
+        };
+        const freshSrc = entry.image_url.startsWith('data:')
+            ? entry.image_url
+            : entry.image_url + '?t=' + Date.now();
+        imgEl.src = '';
+        imgEl.src = freshSrc;
+        imgEl.style.display = 'block';
+        imgWrap.style.display = 'flex';
+    } else {
+        flowEl.classList.add('no-image');
+        imgWrap.style.display = 'none';
+    }
+
+    bodyEl.innerHTML = entry.bodyHtml || `<div class="wiki-card-field-value" style="color:var(--text-muted);font-style:italic;">No details added yet.</div>`;
+    return true;
+}
+
+function buildCharacterTooltipEntry(character, { compact = false } = {}) {
+    const titleList = Array.isArray(character.titles) ? character.titles.filter(Boolean) : [];
+    const meta = [character.role, ...titleList, character.age ? `Age ${character.age}` : ''].filter(Boolean).join(' · ') || 'Character';
+    const fields = [];
+
+    if (compact) {
+        if (titleList.length) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Titles</div><div class="wiki-card-field-value">${escapeHtml(titleList.join(', '))}</div></div>`);
+        if (character.role) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Role</div><div class="wiki-card-field-value">${escapeHtml(character.role)}</div></div>`);
+        if (character.age) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Age</div><div class="wiki-card-field-value">${escapeHtml(character.age)}</div></div>`);
+        if (character.appearance) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Appearance</div><div class="wiki-card-field-value">${escapeHtml(character.appearance)}</div></div>`);
+    } else {
+        if (titleList.length) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Titles</div><div class="wiki-card-field-value">${escapeHtml(titleList.join(', '))}</div></div>`);
+        if (character.personality) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Personality</div><div class="wiki-card-field-value">${escapeHtml(character.personality)}</div></div>`);
+        if (character.backstory) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Backstory</div><div class="wiki-card-field-value">${escapeHtml(character.backstory)}</div></div>`);
+        if (character.appearance) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Appearance</div><div class="wiki-card-field-value">${escapeHtml(character.appearance)}</div></div>`);
+        if (character.extra_notes) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Notes</div><div class="wiki-card-field-value">${escapeHtml(character.extra_notes)}</div></div>`);
+    }
+
+    return {
+        name: character.name || '',
+        meta,
+        image_url: character.image_url || '',
+        bodyHtml: fields.join('')
+    };
+}
+
+function buildWikiTooltipEntry(entry) {
+    if (entry.type === 'character') {
+        return buildCharacterTooltipEntry({
+            name: entry.name,
+            role: entry.role || '',
+            age: entry.age || '',
+            titles: entry.titles || [],
+            image_url: entry.image_url || '',
+            personality: entry.summary || '',
+            backstory: entry.backstory || '',
+            appearance: entry.appearance || '',
+            extra_notes: ''
+        });
+    }
+
+    return {
+        name: entry.name || '',
+        meta: entry.category || 'Lore',
+        image_url: entry.image_url || '',
+        bodyHtml: entry.summary
+            ? `<div class="wiki-card-field"><div class="wiki-card-field-value">${escapeHtml(entry.summary)}</div></div>`
+            : ''
+    };
+}
+
+function showCharacterHoverTooltip(character, x, y, { compact = false } = {}) {
+    const signature = `character:${character.id}:${compact ? 'compact' : 'full'}`;
+    if (activeTooltipSignature !== signature || wikiTooltip.style.display !== 'block') {
+        if (!renderTooltipCard(buildCharacterTooltipEntry(character, { compact }), { compact })) return;
+        activeTooltipSignature = signature;
+        wikiTooltip.style.visibility = 'hidden';
+        wikiTooltip.style.display = 'block';
+    }
+    positionWikiTooltip(x, y);
+    wikiTooltip.style.visibility = 'visible';
+}
+
+function buildCharacterTooltipEntry(character, { compact = false } = {}) {
+    const titleList = Array.isArray(character.titles) ? character.titles.filter(Boolean) : [];
+    const meta = [character.role, character.age ? `Age ${character.age}` : ''].filter(Boolean).join(' · ') || 'Character';
+    const fields = [];
+
+    if (compact) {
+        if (character.role) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Role</div><div class="wiki-card-field-value">${escapeHtml(character.role)}</div></div>`);
+        if (character.age) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Age</div><div class="wiki-card-field-value">${escapeHtml(character.age)}</div></div>`);
+        if (character.appearance) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Appearance</div><div class="wiki-card-field-value">${escapeHtml(character.appearance)}</div></div>`);
+    } else {
+        if (character.personality) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Personality</div><div class="wiki-card-field-value">${escapeHtml(character.personality)}</div></div>`);
+        if (character.backstory) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Backstory</div><div class="wiki-card-field-value">${escapeHtml(character.backstory)}</div></div>`);
+        if (character.appearance) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Appearance</div><div class="wiki-card-field-value">${escapeHtml(character.appearance)}</div></div>`);
+        if (character.extra_notes) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Notes</div><div class="wiki-card-field-value">${escapeHtml(character.extra_notes)}</div></div>`);
+    }
+
+    return {
+        name: character.name || '',
+        meta,
+        titlesText: titleList.join(' · '),
+        image_url: character.image_url || '',
+        bodyHtml: fields.join('')
+    };
+}
+
+function buildWikiTooltipEntry(entry) {
+    if (entry.type === 'character') {
+        return buildCharacterTooltipEntry({
+            name: entry.name,
+            role: entry.role || '',
+            age: entry.age || '',
+            titles: entry.titles || [],
+            image_url: entry.image_url || '',
+            personality: entry.summary || '',
+            backstory: entry.backstory || '',
+            appearance: entry.appearance || '',
+            extra_notes: ''
+        });
+    }
+
+    return {
+        name: entry.name || '',
+        meta: entry.category || 'Lore',
+        titlesText: '',
+        image_url: entry.image_url || '',
+        bodyHtml: entry.summary
+            ? `<div class="wiki-card-field"><div class="wiki-card-field-value">${escapeHtml(entry.summary)}</div></div>`
+            : ''
+    };
+}
 
 // --- NOTES PANEL ---
 let notesAutoSaveTimer = null;
@@ -1191,6 +1579,67 @@ let relDragging = null, relDragOffX = 0, relDragOffY = 0;
 let relZoom = 1, relPanX = 0, relPanY = 0;
 let relIsPanning = false, relPanStart = { x: 0, y: 0 };
 let relCanvas = null, relCtx = null;
+let relHoveredNodeId = null;
+const RELATION_TYPE_OPTIONS = [
+    ['allies', 'Allies'],
+    ['rivals', 'Rivals'],
+    ['lovers', 'Lovers'],
+    ['enemies', 'Enemies'],
+    ['family', 'Family'],
+    ['mentor', 'Mentor / Student'],
+    ['friends', 'Friends'],
+    ['complicated', 'Complicated'],
+    ['strangers', 'Strangers'],
+    ['custom', 'Custom']
+];
+
+function formatRelationLabel(value) {
+    if (!value) return 'Relationship';
+    const preset = RELATION_TYPE_OPTIONS.find(([key]) => key === value);
+    return preset ? preset[1] : value;
+}
+
+function isRelWebOpen() {
+    return document.getElementById('relWebOverlay')?.style.display !== 'none';
+}
+
+function ensureRelationTypeInputs() {
+    const newSelect = document.getElementById('relTypeInput');
+    const editSelect = document.getElementById('editRelTypeInput');
+    if (!newSelect || !editSelect) return;
+
+    const optionHtml = RELATION_TYPE_OPTIONS.map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
+    newSelect.innerHTML = optionHtml;
+    editSelect.innerHTML = optionHtml;
+
+    if (!document.getElementById('relCustomTypeInput')) {
+        newSelect.insertAdjacentHTML('afterend', '<input type="text" class="modal-input" id="relCustomTypeInput" placeholder="e.g. Brother, Sister, Cousins..." style="display:none;">');
+    }
+    if (!document.getElementById('editRelCustomTypeInput')) {
+        editSelect.insertAdjacentHTML('afterend', '<input type="text" class="modal-input" id="editRelCustomTypeInput" placeholder="e.g. Brother, Sister, Cousins..." style="display:none;">');
+    }
+
+    updateRelationCustomInput('rel');
+    updateRelationCustomInput('edit');
+}
+
+function updateRelationCustomInput(mode) {
+    const select = document.getElementById(mode === 'edit' ? 'editRelTypeInput' : 'relTypeInput');
+    const input = document.getElementById(mode === 'edit' ? 'editRelCustomTypeInput' : 'relCustomTypeInput');
+    if (!select || !input) return;
+    const isCustom = select.value === 'custom';
+    input.style.display = isCustom ? 'block' : 'none';
+    input.required = isCustom;
+}
+
+function getSelectedRelationType(mode) {
+    const select = document.getElementById(mode === 'edit' ? 'editRelTypeInput' : 'relTypeInput');
+    const input = document.getElementById(mode === 'edit' ? 'editRelCustomTypeInput' : 'relCustomTypeInput');
+    if (!select) return '';
+    if (select.value !== 'custom') return select.value;
+    const customValue = input?.value.trim() || '';
+    return customValue;
+}
 
 async function loadRelationships(projectId) {
     try { renderRelationshipsList(await api('GET', `/api/projects/${projectId}/relationships`)); }
@@ -1291,6 +1740,110 @@ async function deleteRelFromEdit() {
     catch (e) { console.error('deleteRelFromEdit:', e); }
 }
 
+function renderRelationshipsList(rels) {
+    if (!rels.length) { relationshipsList.innerHTML = '<li class="empty-state">No relationships yet.</li>'; return; }
+    relationshipsList.innerHTML = rels.map(r => `
+        <li class="item-list-entry">
+            <span class="item-name" title="${escapeHtml(`${r.char_a_name} ${formatRelationLabel(r.relation_type)} ${r.char_b_name}`)}" style="display:flex;align-items:center;gap:6px;">
+                <span style="width:8px;height:8px;border-radius:50%;background:${r.color};flex-shrink:0;display:inline-block;"></span>
+                ${escapeHtml(r.char_a_name)}
+                <span style="color:var(--text-muted);font-size:11px;">${escapeHtml(formatRelationLabel(r.relation_type))}</span>
+                ${escapeHtml(r.char_b_name)}
+            </span>
+            <button class="item-delete" aria-label="Delete relationship" title="Delete relationship" onclick="deleteRelationship(event,${r.id})">&times;</button>
+        </li>`).join('');
+}
+
+async function openNewRelModal(options = {}) {
+    try {
+        const chars = await api('GET', `/api/projects/${currentProjectId}/characters`);
+        if (chars.length < 2) { alert('You need at least 2 characters!'); return; }
+        const charOptions = chars.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+        document.getElementById('relCharAInput').innerHTML = charOptions;
+        document.getElementById('relCharBInput').innerHTML = charOptions;
+        if (typeof options.preselectCharA === 'number') {
+            document.getElementById('relCharAInput').value = String(options.preselectCharA);
+            const fallbackCharB = chars.find(c => c.id !== options.preselectCharA);
+            if (fallbackCharB) document.getElementById('relCharBInput').value = String(fallbackCharB.id);
+        } else if (chars.length > 1) {
+            document.getElementById('relCharBInput').value = chars[1].id;
+        }
+        document.getElementById('relTypeInput').value = 'allies';
+        const customInput = document.getElementById('relCustomTypeInput');
+        if (customInput) customInput.value = '';
+        updateRelationCustomInput('new');
+        relSelectedColor = '#7b6fb0';
+        document.querySelectorAll('#relColorPicker .rel-color-opt').forEach(o => o.classList.toggle('selected', o.dataset.color === relSelectedColor));
+        openModal(newRelModal);
+    } catch (e) { console.error('openNewRelModal:', e); }
+}
+
+function openEditRelModal(edge) {
+    editingRelId = edge.id;
+    editRelColor = edge.color || '#7b6fb0';
+    document.getElementById('editRelCharNames').textContent = `${edge.char_a_name} <-> ${edge.char_b_name}`;
+    const select = document.getElementById('editRelTypeInput');
+    const customInput = document.getElementById('editRelCustomTypeInput');
+    const isPreset = RELATION_TYPE_OPTIONS.some(([value]) => value === edge.relation_type && value !== 'custom');
+    select.value = isPreset ? edge.relation_type : 'custom';
+    if (customInput) customInput.value = isPreset ? '' : (edge.relation_type || '');
+    updateRelationCustomInput('edit');
+    document.getElementById('editRelDescInput').value = edge.description || '';
+    document.querySelectorAll('#editRelColorPicker .rel-color-opt').forEach(o => o.classList.toggle('selected', o.dataset.color === editRelColor));
+    openModal(document.getElementById('editRelModal'));
+}
+
+async function createRelationship() {
+    const charA = parseInt(document.getElementById('relCharAInput').value);
+    const charB = parseInt(document.getElementById('relCharBInput').value);
+    if (charA === charB) { alert('Select two different characters!'); return; }
+    const relationType = getSelectedRelationType('new');
+    if (!relationType) {
+        document.getElementById('relCustomTypeInput')?.focus();
+        return;
+    }
+    const btn = document.getElementById('confirmRelBtn');
+    btn.textContent = 'Adding...'; btn.disabled = true;
+    try {
+        await api('POST', `/api/projects/${currentProjectId}/relationships`, {
+            char_a_id: charA, char_b_id: charB,
+            relation_type: relationType,
+            description: document.getElementById('relDescInput').value.trim(),
+            color: relSelectedColor
+        });
+        closeModal(newRelModal);
+        document.getElementById('relDescInput').value = '';
+        const customInput = document.getElementById('relCustomTypeInput');
+        if (customInput) customInput.value = '';
+        document.getElementById('relTypeInput').value = 'allies';
+        updateRelationCustomInput('new');
+        await loadRelationships(currentProjectId);
+        if (isRelWebOpen()) await openRelWeb();
+    } catch (e) { console.error('createRelationship:', e); }
+    finally { btn.textContent = 'Add Relationship'; btn.disabled = false; }
+}
+
+async function saveEditRel() {
+    if (!editingRelId) return;
+    const relationType = getSelectedRelationType('edit');
+    if (!relationType) {
+        document.getElementById('editRelCustomTypeInput')?.focus();
+        return;
+    }
+    const btn = document.getElementById('confirmEditRelBtn');
+    btn.textContent = 'Saving...'; btn.disabled = true;
+    try {
+        await api('PUT', `/api/relationships/${editingRelId}`, {
+            relation_type: relationType,
+            description: document.getElementById('editRelDescInput').value.trim(),
+            color: editRelColor
+        });
+        closeModal(document.getElementById('editRelModal'));
+        await loadRelationships(currentProjectId); await openRelWeb();
+    } catch (e) { console.error('saveEditRel:', e); }
+    finally { btn.textContent = 'Save Changes'; btn.disabled = false; }
+}
+
 async function openRelWeb() {
     try {
         const [chars, rels] = await Promise.all([
@@ -1313,9 +1866,24 @@ async function openRelWeb() {
         const cx = cssW / 2, cy = cssH / 2, radius = Math.min(cx, cy) * 0.55;
         relNodes = chars.map((c, i) => {
             const angle = (2 * Math.PI * i) / chars.length - Math.PI / 2;
-            return { id: c.id, name: c.name, role: c.role || '', image_url: c.image_url || '', x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle), img: null };
+            return {
+                id: c.id,
+                name: c.name,
+                role: c.role || '',
+                titles: c.titles || [],
+                age: c.age || '',
+                personality: c.personality || '',
+                backstory: c.backstory || '',
+                appearance: c.appearance || '',
+                extra_notes: c.extra_notes || '',
+                image_url: c.image_url || '',
+                x: cx + radius * Math.cos(angle),
+                y: cy + radius * Math.sin(angle),
+                img: null
+            };
         });
         relEdges = rels;
+        relHoveredNodeId = null;
         relNodes.forEach(node => {
             if (node.image_url) {
                 const img = new Image(); img.src = node.image_url;
@@ -1338,6 +1906,17 @@ function drawRelWeb() {
     const style = getComputedStyle(document.documentElement);
     const textPrimary = style.getPropertyValue('--text-primary').trim() || '#f0eeff';
     const bgModal = style.getPropertyValue('--bg-modal').trim() || '#181a2e';
+    const bgHover = style.getPropertyValue('--bg-hover').trim() || 'rgba(160,160,170,0.25)';
+    const connectedNodeIds = new Set();
+    if (relHoveredNodeId) {
+        connectedNodeIds.add(relHoveredNodeId);
+        relEdges.forEach(edge => {
+            if (edge.char_a_id === relHoveredNodeId || edge.char_b_id === relHoveredNodeId) {
+                connectedNodeIds.add(edge.char_a_id);
+                connectedNodeIds.add(edge.char_b_id);
+            }
+        });
+    }
 
     ctx.clearRect(0, 0, W, H);
     ctx.save();
@@ -1356,6 +1935,7 @@ function drawRelWeb() {
         const nodeA = relNodes.find(n => n.id === edge.char_a_id);
         const nodeB = relNodes.find(n => n.id === edge.char_b_id);
         if (!nodeA || !nodeB) return;
+        const isRelatedToHover = relHoveredNodeId && (edge.char_a_id === relHoveredNodeId || edge.char_b_id === relHoveredNodeId);
         const key = [Math.min(edge.char_a_id, edge.char_b_id), Math.max(edge.char_a_id, edge.char_b_id)].join('-');
         const total = pairCount[key] || 1;
         pairIndex[key] = pairIndex[key] || 0;
@@ -1371,53 +1951,84 @@ function drawRelWeb() {
 
         ctx.beginPath(); ctx.moveTo(nodeA.x, nodeA.y);
         ctx.quadraticCurveTo(cpX, cpY, nodeB.x, nodeB.y);
-        ctx.strokeStyle = edge.color || '#7b6fb0'; ctx.lineWidth = 2.5; ctx.globalAlpha = 0.8; ctx.stroke(); ctx.globalAlpha = 1;
+        ctx.strokeStyle = edge.color || '#7b6fb0';
+        ctx.lineWidth = isRelatedToHover ? 4.5 : 2.5;
+        ctx.globalAlpha = relHoveredNodeId ? (isRelatedToHover ? 1 : 0.06) : 0.8;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
 
         const lx = 0.25 * nodeA.x + 0.5 * cpX + 0.25 * nodeB.x;
         const ly = 0.25 * nodeA.y + 0.5 * cpY + 0.25 * nodeB.y;
-        ctx.font = '13px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillStyle = bgModal; ctx.beginPath(); ctx.roundRect(lx - 15, ly - 11, 30, 22, 6); ctx.fill();
+        const relLabel = formatRelationLabel(edge.relation_type);
+        ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        const labelW = Math.max(42, ctx.measureText(relLabel).width + 16);
+        ctx.fillStyle = relHoveredNodeId ? (isRelatedToHover ? bgHover : 'rgba(118,118,126,0.24)') : bgModal; ctx.beginPath(); ctx.roundRect(lx - labelW / 2, ly - 11, labelW, 22, 6); ctx.fill();
+        ctx.globalAlpha = relHoveredNodeId ? (isRelatedToHover ? 1 : 0.12) : 1;
         ctx.strokeStyle = edge.color || '#7b6fb0'; ctx.lineWidth = 1; ctx.stroke();
-        ctx.fillText(relTypeEmoji[edge.relation_type] || edge.relation_type, lx, ly);
+        ctx.globalAlpha = relHoveredNodeId ? (isRelatedToHover ? 1 : 0.4) : 1;
+        ctx.fillStyle = relHoveredNodeId ? (isRelatedToHover ? textPrimary : 'rgba(225,225,232,0.42)') : textPrimary;
+        ctx.fillText(relLabel, lx, ly);
+        ctx.globalAlpha = 1;
     });
 
     const nr = 38;
     relNodes.forEach(node => {
-        ctx.save(); ctx.beginPath(); ctx.arc(node.x, node.y, nr, 0, Math.PI * 2); ctx.clip();
+        const isHoverFocus = relHoveredNodeId === node.id;
+        const isHoverRelated = connectedNodeIds.has(node.id);
+        const drawY = node.y - (isHoverRelated ? 6 : 0);
+        const drawR = nr + (isHoverFocus ? 3 : 0);
+        ctx.save(); ctx.beginPath(); ctx.arc(node.x, drawY, drawR, 0, Math.PI * 2); ctx.clip();
+        ctx.globalAlpha = relHoveredNodeId ? (isHoverRelated ? 1 : 0.16) : 1;
         if (node.img && node.img.complete && node.img.naturalWidth > 0) {
             const iw = node.img.naturalWidth;
             const ih = node.img.naturalHeight;
             const srcSize = Math.min(iw, ih);
             const srcX = (iw - srcSize) / 2;
             const srcY = (ih - srcSize) / 2;
-            ctx.drawImage(node.img, srcX, srcY, srcSize, srcSize, node.x - nr, node.y - nr, nr * 2, nr * 2);
+            ctx.drawImage(node.img, srcX, srcY, srcSize, srcSize, node.x - drawR, drawY - drawR, drawR * 2, drawR * 2);
         } else {
-            const grad = ctx.createRadialGradient(node.x, node.y - nr * 0.3, 0, node.x, node.y, nr);
+            const grad = ctx.createRadialGradient(node.x, drawY - drawR * 0.3, 0, node.x, drawY, drawR);
             grad.addColorStop(0, '#5b7fb0'); grad.addColorStop(1, '#7b6fb0');
-            ctx.fillStyle = grad; ctx.fillRect(node.x - nr, node.y - nr, nr * 2, nr * 2);
+            ctx.fillStyle = grad; ctx.fillRect(node.x - drawR, drawY - drawR, drawR * 2, drawR * 2);
             ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.font = 'bold 22px serif';
             ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-            ctx.fillText(node.name.charAt(0).toUpperCase(), node.x, node.y);
+            ctx.fillText(node.name.charAt(0).toUpperCase(), node.x, drawY);
         }
         ctx.restore();
-        ctx.beginPath(); ctx.arc(node.x, node.y, nr, 0, Math.PI * 2);
-        ctx.strokeStyle = '#7b6fb0'; ctx.lineWidth = 2.5; ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.beginPath(); ctx.arc(node.x, drawY, drawR, 0, Math.PI * 2);
+        ctx.strokeStyle = relHoveredNodeId ? (isHoverRelated ? '#d7d2e2' : 'rgba(123,111,176,0.22)') : '#7b6fb0'; ctx.lineWidth = isHoverFocus ? 4.5 : 2.5; ctx.stroke();
 
         ctx.font = `600 13px 'DM Sans', sans-serif`;
         const nameW = ctx.measureText(node.name).width + 16, nameH = 22;
-        const nameX = node.x - nameW / 2, nameY = node.y + nr + 6;
-        ctx.fillStyle = bgModal; ctx.beginPath(); ctx.roundRect(nameX, nameY, nameW, nameH, 6); ctx.fill();
-        ctx.fillStyle = textPrimary; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        const nameX = node.x - nameW / 2, nameY = drawY + drawR + 6;
+        ctx.fillStyle = relHoveredNodeId ? (isHoverRelated ? bgHover : 'rgba(118,118,126,0.26)') : bgModal; ctx.beginPath(); ctx.roundRect(nameX, nameY, nameW, nameH, 6); ctx.fill();
+        ctx.fillStyle = relHoveredNodeId ? (isHoverRelated ? textPrimary : 'rgba(225,225,232,0.42)') : textPrimary; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(node.name, node.x, nameY + nameH / 2);
 
+        let roleBounds = null;
         if (node.role) {
             ctx.font = `11px 'DM Sans', sans-serif`;
             const rW = ctx.measureText(node.role).width + 12, rY = nameY + nameH + 3;
-            ctx.fillStyle = 'rgba(157,143,212,0.15)'; ctx.beginPath(); ctx.roundRect(node.x - rW / 2, rY, rW, 18, 5); ctx.fill();
-            ctx.fillStyle = '#9d8fd4'; ctx.textBaseline = 'middle'; ctx.fillText(node.role, node.x, rY + 9);
+            ctx.fillStyle = relHoveredNodeId ? (isHoverRelated ? bgHover : 'rgba(118,118,126,0.22)') : 'rgba(157,143,212,0.15)'; ctx.beginPath(); ctx.roundRect(node.x - rW / 2, rY, rW, 18, 5); ctx.fill();
+            ctx.fillStyle = relHoveredNodeId ? (isHoverRelated ? '#9d8fd4' : 'rgba(190,190,205,0.38)') : '#9d8fd4'; ctx.textBaseline = 'middle'; ctx.fillText(node.role, node.x, rY + 9);
+            roleBounds = { x: node.x - rW / 2, y: rY, w: rW, h: 18 };
         }
+        node._hoverBounds = { cx: node.x, cy: drawY, r: drawR, nameX, nameY, nameW, nameH, roleBounds };
     });
     ctx.restore();
+}
+
+function getRelNodeAtPoint(cx, cy) {
+    return relNodes.find(node => {
+        const bounds = node._hoverBounds;
+        if (!bounds) return false;
+        const onCircle = Math.hypot(bounds.cx - cx, bounds.cy - cy) <= bounds.r;
+        const onName = cx >= bounds.nameX && cx <= bounds.nameX + bounds.nameW && cy >= bounds.nameY && cy <= bounds.nameY + bounds.nameH;
+        const onRole = bounds.roleBounds && cx >= bounds.roleBounds.x && cx <= bounds.roleBounds.x + bounds.roleBounds.w &&
+            cy >= bounds.roleBounds.y && cy <= bounds.roleBounds.y + bounds.roleBounds.h;
+        return onCircle || onName || onRole;
+    }) || null;
 }
 
 function setupRelCanvasEvents() {
@@ -1438,6 +2049,7 @@ function setupRelCanvasEvents() {
         const mx = e.clientX - rect.left, my = e.clientY - rect.top;
         mouseDownPos = { x: mx, y: my }; mouseDownTime = Date.now();
         const cx = (mx - relPanX) / relZoom, cy = (my - relPanY) / relZoom;
+        hideWikiTooltip();
         relDragging = relNodes.find(n => Math.hypot(n.x - cx, n.y - cy) < 42);
         if (relDragging) { relDragOffX = relDragging.x - cx; relDragOffY = relDragging.y - cy; }
         else { relIsPanning = true; relPanStart = { x: mx - relPanX, y: my - relPanY }; relCanvas.style.cursor = 'grabbing'; }
@@ -1452,6 +2064,21 @@ function setupRelCanvasEvents() {
             drawRelWeb();
         } else if (relIsPanning) {
             relPanX = mx - relPanStart.x; relPanY = my - relPanStart.y; drawRelWeb();
+        } else {
+            const cx = (mx - relPanX) / relZoom, cy = (my - relPanY) / relZoom;
+            const hoveredNode = getRelNodeAtPoint(cx, cy);
+            const hoveredId = hoveredNode?.id || null;
+            if (hoveredId !== relHoveredNodeId) {
+                relHoveredNodeId = hoveredId;
+                drawRelWeb();
+            }
+            if (hoveredNode) {
+                relCanvas.style.cursor = 'pointer';
+                showCharacterHoverTooltip(hoveredNode, e.clientX, e.clientY, { compact: true });
+            } else {
+                relCanvas.style.cursor = 'grab';
+                hideWikiTooltip();
+            }
         }
     };
 
@@ -1468,7 +2095,24 @@ function setupRelCanvasEvents() {
         relCanvas.style.cursor = 'grab';
     };
 
-    relCanvas.onmouseleave = () => { relDragging = null; relIsPanning = false; relCanvas.style.cursor = 'grab'; };
+    relCanvas.ondblclick = (e) => {
+        const rect = relCanvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+        const cx = (mx - relPanX) / relZoom, cy = (my - relPanY) / relZoom;
+        const clickedNode = getRelNodeAtPoint(cx, cy);
+        if (clickedNode) {
+            openNewRelModal({ preselectCharA: clickedNode.id });
+        }
+    };
+
+    relCanvas.onmouseleave = () => {
+        relDragging = null;
+        relIsPanning = false;
+        relHoveredNodeId = null;
+        relCanvas.style.cursor = 'grab';
+        hideWikiTooltip();
+        drawRelWeb();
+    };
 
     window.addEventListener('resize', () => {
         if (document.getElementById('relWebOverlay').style.display !== 'none') {
@@ -1539,7 +2183,7 @@ function closeTab(event, id, type) {
 }
 
 // --- AUTO-SAVE & LOCALSTORAGE ---
-function getLocalKey(key) { return `scripvia_doc_${key}`; }
+function getLocalKey(key) { return `scripvia_doc_${storageScopeKey}_${key}`; }
 
 function saveToLocalStorage() {
     if (!currentDocId || !quill) return;
@@ -1728,10 +2372,13 @@ async function checkAuthState() {
         const loginBtn = document.getElementById('loginBtn');
         const userInfo = document.getElementById('userInfo');
         if (data.logged_in) {
+            storageScopeKey = data.scope_key || `user_${data.user.id}`;
             loginBtn.style.display = 'none'; userInfo.classList.remove('hidden');
             document.getElementById('userAvatar').src = data.user.picture;
             document.getElementById('userName').textContent = data.user.name.split(' ')[0];
         } else {
+            storageScopeKey = data.scope_key || localStorage.getItem('scripvia_guest_scope') || `guest_${Date.now()}`;
+            localStorage.setItem('scripvia_guest_scope', storageScopeKey);
             const guest = localStorage.getItem('scripvia_guest');
             if (guest) showGuestUser(JSON.parse(guest).name);
             else { loginBtn.style.display = 'flex'; userInfo.classList.add('hidden'); }
@@ -1788,6 +2435,9 @@ saveBtn.addEventListener('click', saveDocument);
 // --- INIT ---
 document.addEventListener('DOMContentLoaded', () => {
 
+    ensureWikiTooltipLayout();
+    ensureRelationTypeInputs();
+    ensureCharacterTitlesUI();
     document.getElementById('wikiCardClose').addEventListener('click', hideWikiTooltip);
     document.getElementById('backToOverview').addEventListener('click', () => { hideEditor(); showProjectOverview(currentProjectId); });
     document.getElementById('notesToggleBtn').addEventListener('click', toggleNotesPanel);
@@ -1797,11 +2447,13 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('newRelBtn').addEventListener('click', openNewRelModal);
     document.getElementById('viewRelWebBtn').addEventListener('click', openRelWeb);
     document.getElementById('relWebClose').addEventListener('click', closeRelWeb);
-    document.getElementById('relWebAddBtn').addEventListener('click', () => { closeRelWeb(); openNewRelModal(); });
+    document.getElementById('relWebAddBtn').addEventListener('click', () => openNewRelModal());
     document.getElementById('cancelRelBtn').addEventListener('click', () => closeModal(newRelModal));
     document.getElementById('cancelRelBtnX').addEventListener('click', () => closeModal(newRelModal));
     document.getElementById('confirmRelBtn').addEventListener('click', createRelationship);
     document.getElementById('confirmEditRelBtn').addEventListener('click', saveEditRel);
+    document.getElementById('relTypeInput').addEventListener('change', () => updateRelationCustomInput('new'));
+    document.getElementById('editRelTypeInput').addEventListener('change', () => updateRelationCustomInput('edit'));
     document.getElementById('cancelEditRelBtn').addEventListener('click', () => closeModal(document.getElementById('editRelModal')));
     document.getElementById('cancelEditRelBtnX').addEventListener('click', () => closeModal(document.getElementById('editRelModal')));
     document.getElementById('deleteRelFromEditBtn').addEventListener('click', deleteRelFromEdit);
