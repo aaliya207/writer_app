@@ -247,7 +247,6 @@ async function selectProject(id) {
         currentProjectId = id;
         const projects = await api('GET', '/api/projects');
         currentProjectData = projects.find(p => p.id === id);
-        api('POST', `/api/projects/${id}/drive-sync-all`).catch(e => console.error('projectDriveSync:', e));
         showProjectDetail();
         currentProjectName.textContent = currentProjectData.title;
         await showProjectOverview(id);
@@ -465,9 +464,6 @@ async function saveDocument() {
             setSaveStatus('syncing');
             try {
                 await api('POST', `/api/documents/${currentDocId}/sync`);
-                if (currentProjectId) {
-                    await api('POST', `/api/projects/${currentProjectId}/drive-sync-all`);
-                }
                 setSaveStatus('synced');
                 setTimeout(() => setSaveStatus('saved'), 2000);
             }
