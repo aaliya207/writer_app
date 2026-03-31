@@ -14,6 +14,7 @@ let openTabs = [];
 let wikiData = {};
 let currentCharacters = [];
 let storageScopeKey = 'guest_default';
+let relResizeHandler = null;
 
 // --- DOM REFS ---
 const projectsList = document.getElementById('projectsList');
@@ -1642,55 +1643,6 @@ async function loadRelationships(projectId) {
     catch (e) { console.error('loadRelationships:', e); }
 }
 
-function renderRelationshipsList(rels) {
-    const emoji = { allies: '🤝', rivals: '⚔️', lovers: '💕', enemies: '🖤', family: '👨‍👩‍👧', mentor: '🧭', friends: '😊', complicated: '🌀', strangers: '👥' };
-    if (!rels.length) { relationshipsList.innerHTML = '<li class="empty-state">No relationships yet.</li>'; return; }
-    relationshipsList.innerHTML = rels.map(r => `
-        <li class="item-list-entry">
-            <span class="item-name" style="display:flex;align-items:center;gap:6px;">
-                <span style="width:8px;height:8px;border-radius:50%;background:${r.color};flex-shrink:0;display:inline-block;"></span>
-                ${escapeHtml(r.char_a_name)}
-                <span style="color:var(--text-muted);font-size:11px;">${emoji[r.relation_type] || '↔'} ${r.relation_type}</span>
-                ${escapeHtml(r.char_b_name)}
-            </span>
-            <button class="item-delete" onclick="deleteRelationship(event,${r.id})">×</button>
-        </li>`).join('');
-}
-
-async function openNewRelModal() {
-    try {
-        const chars = await api('GET', `/api/projects/${currentProjectId}/characters`);
-        if (chars.length < 2) { alert('You need at least 2 characters!'); return; }
-        const options = chars.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
-        document.getElementById('relCharAInput').innerHTML = options;
-        document.getElementById('relCharBInput').innerHTML = options;
-        if (chars.length > 1) document.getElementById('relCharBInput').value = chars[1].id;
-        relSelectedColor = '#7b6fb0';
-        document.querySelectorAll('#relColorPicker .rel-color-opt').forEach(o => o.classList.toggle('selected', o.dataset.color === relSelectedColor));
-        openModal(newRelModal);
-    } catch (e) { console.error('openNewRelModal:', e); }
-}
-
-async function createRelationship() {
-    const charA = parseInt(document.getElementById('relCharAInput').value);
-    const charB = parseInt(document.getElementById('relCharBInput').value);
-    if (charA === charB) { alert('Select two different characters!'); return; }
-    const btn = document.getElementById('confirmRelBtn');
-    btn.textContent = 'Adding...'; btn.disabled = true;
-    try {
-        await api('POST', `/api/projects/${currentProjectId}/relationships`, {
-            char_a_id: charA, char_b_id: charB,
-            relation_type: document.getElementById('relTypeInput').value,
-            description: document.getElementById('relDescInput').value.trim(),
-            color: relSelectedColor
-        });
-        closeModal(newRelModal);
-        document.getElementById('relDescInput').value = '';
-        await loadRelationships(currentProjectId);
-    } catch (e) { console.error('createRelationship:', e); }
-    finally { btn.textContent = 'Add Relationship'; btn.disabled = false; }
-}
-
 async function deleteRelationship(event, id) {
     event.stopPropagation();
     showConfirm('This relationship will be removed.', async () => {
@@ -1703,31 +1655,6 @@ async function deleteRelationship(event, id) {
 }
 
 let editingRelId = null, editRelColor = '#7b6fb0';
-
-function openEditRelModal(edge) {
-    editingRelId = edge.id; editRelColor = edge.color || '#7b6fb0';
-    document.getElementById('editRelCharNames').textContent = `${edge.char_a_name}  ↔  ${edge.char_b_name}`;
-    document.getElementById('editRelTypeInput').value = edge.relation_type || 'allies';
-    document.getElementById('editRelDescInput').value = edge.description || '';
-    document.querySelectorAll('#editRelColorPicker .rel-color-opt').forEach(o => o.classList.toggle('selected', o.dataset.color === editRelColor));
-    openModal(document.getElementById('editRelModal'));
-}
-
-async function saveEditRel() {
-    if (!editingRelId) return;
-    const btn = document.getElementById('confirmEditRelBtn');
-    btn.textContent = 'Saving...'; btn.disabled = true;
-    try {
-        await api('PUT', `/api/relationships/${editingRelId}`, {
-            relation_type: document.getElementById('editRelTypeInput').value,
-            description: document.getElementById('editRelDescInput').value.trim(),
-            color: editRelColor
-        });
-        closeModal(document.getElementById('editRelModal'));
-        await loadRelationships(currentProjectId); await openRelWeb();
-    } catch (e) { console.error('saveEditRel:', e); }
-    finally { btn.textContent = 'Save Changes'; btn.disabled = false; }
-}
 
 async function deleteRelFromEdit() {
     const id = editingRelId;
@@ -1853,11 +1780,9 @@ async function openRelWeb() {
         relCanvas = document.getElementById('relWebCanvas');
         relCtx = relCanvas.getContext('2d');
         await new Promise(r => setTimeout(r, 50));
-        const dpr = window.devicePixelRatio || 1;
-        const cssW = relCanvas.offsetWidth, cssH = relCanvas.offsetHeight;
-        relCanvas.width = cssW * dpr; relCanvas.height = cssH * dpr;
-        relCtx.scale(dpr, dpr);
-        relCanvas._dpr = dpr; relCanvas._cssW = cssW; relCanvas._cssH = cssH;
+        resizeRelCanvas();
+        const cssW = relCanvas._cssW || relCanvas.offsetWidth;
+        const cssH = relCanvas._cssH || relCanvas.offsetHeight;
         relZoom = 1; relPanX = 0; relPanY = 0;
         const cx = cssW / 2, cy = cssH / 2, radius = Math.min(cx, cy) * 0.55;
         relNodes = chars.map((c, i) => {
@@ -2027,6 +1952,18 @@ function getRelNodeAtPoint(cx, cy) {
     }) || null;
 }
 
+function resizeRelCanvas() {
+    if (!relCanvas || !relCtx || !isRelWebOpen()) return;
+    const dpr = window.devicePixelRatio || 1;
+    relCanvas.width = relCanvas.offsetWidth * dpr;
+    relCanvas.height = relCanvas.offsetHeight * dpr;
+    relCanvas._dpr = dpr;
+    relCanvas._cssW = relCanvas.offsetWidth;
+    relCanvas._cssH = relCanvas.offsetHeight;
+    relCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawRelWeb();
+}
+
 function setupRelCanvasEvents() {
     let mouseDownPos = null, mouseDownTime = 0;
 
@@ -2110,15 +2047,10 @@ function setupRelCanvasEvents() {
         drawRelWeb();
     };
 
-    window.addEventListener('resize', () => {
-        if (document.getElementById('relWebOverlay').style.display !== 'none') {
-            const dpr = window.devicePixelRatio || 1;
-            relCanvas.width = relCanvas.offsetWidth * dpr;
-            relCanvas.height = relCanvas.offsetHeight * dpr;
-            relCanvas._dpr = dpr; relCanvas._cssW = relCanvas.offsetWidth; relCanvas._cssH = relCanvas.offsetHeight;
-            relCtx.scale(dpr, dpr); drawRelWeb();
-        }
-    });
+    if (!relResizeHandler) {
+        relResizeHandler = () => resizeRelCanvas();
+        window.addEventListener('resize', relResizeHandler);
+    }
 }
 
 function isNearCurve(mx, my, edge) {
@@ -2135,6 +2067,9 @@ function closeRelWeb() {
     document.getElementById('relWebOverlay').style.display = 'none';
     document.body.classList.remove("rel-web-open");
     relDragging = null;
+    relIsPanning = false;
+    relHoveredNodeId = null;
+    hideWikiTooltip();
 }
 // --- OPEN TABS ---
 function addOpenTab(id, title, type = 'chapter') {

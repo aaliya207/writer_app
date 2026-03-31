@@ -238,43 +238,43 @@ def get_guest_session_id():
     return guest_session_id
 
 
+def legacy_project_filter():
+    return Project.user_id.is_(None) & ((Project.guest_session_id == '') | Project.guest_session_id.is_(None))
+
+
+def is_legacy_project(project):
+    return project.user_id is None and not (project.guest_session_id or '').strip()
+
+
 def project_is_owned_by_current_session(project):
+    if is_legacy_project(project):
+        return True
     user = get_current_user()
     if user:
         return project.user_id == user.id
     return project.user_id is None and project.guest_session_id == get_guest_session_id()
 
 
-def maybe_claim_legacy_projects():
-    legacy_projects = Project.query.filter(
-        Project.user_id.is_(None),
-        (Project.guest_session_id == '') | Project.guest_session_id.is_(None)
-    ).all()
-    if not legacy_projects:
-        return
-
+def claim_legacy_project(project):
+    if not is_legacy_project(project):
+        return False
     user = get_current_user()
-    owned_count = Project.query.filter_by(user_id=user.id).count() if user else Project.query.filter_by(
-        user_id=None, guest_session_id=get_guest_session_id()
-    ).count()
-    if owned_count:
-        return
-
-    for project in legacy_projects:
-        if user:
-            project.user_id = user.id
-            project.guest_session_id = ''
-        else:
-            project.user_id = None
-            project.guest_session_id = get_guest_session_id()
+    if user:
+        project.user_id = user.id
+        project.guest_session_id = ''
+    else:
+        project.user_id = None
+        project.guest_session_id = get_guest_session_id()
     db.session.commit()
+    return True
 
 
 def get_project_or_404(project_id):
-    maybe_claim_legacy_projects()
     project = Project.query.get_or_404(project_id)
     if not project_is_owned_by_current_session(project):
         abort(404)
+    if request.method != 'GET':
+        claim_legacy_project(project)
     return project
 
 
@@ -295,7 +295,8 @@ def get_drive_service(user):
 
 
 def get_or_create_folder(drive, name, parent_id=None):
-    query = f"name='{name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    safe_name = (name or '').replace("\\", "\\\\").replace("'", "\\'")
+    query = f"name='{safe_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
     if parent_id:
         query += f" and '{parent_id}' in parents"
     files = drive.files().list(q=query, fields='files(id)', pageSize=1).execute().get('files', [])
@@ -324,10 +325,26 @@ def drive_safe_name(name, fallback='untitled'):
 
 
 def find_drive_file_id(drive, name, parent_id):
-    safe_name = name.replace("'", "\\'")
+    safe_name = (name or '').replace("\\", "\\\\").replace("'", "\\'")
     query = f"name='{safe_name}' and '{parent_id}' in parents and trashed=false"
     files = drive.files().list(q=query, fields='files(id)', pageSize=1).execute().get('files', [])
     return files[0]['id'] if files else ''
+
+
+def get_valid_relationships(project_id):
+    rels = CharacterRelationship.query.filter_by(project_id=project_id).all()
+    invalid_rels = [
+        rel for rel in rels
+        if not rel.char_a or not rel.char_b
+        or rel.char_a.project_id != project_id
+        or rel.char_b.project_id != project_id
+    ]
+    if invalid_rels:
+        for rel in invalid_rels:
+            db.session.delete(rel)
+        db.session.commit()
+    invalid_ids = {rel.id for rel in invalid_rels}
+    return [rel for rel in rels if rel.id not in invalid_ids]
 
 
 def create_drive_file(drive, name, content, parent_id):
@@ -535,7 +552,7 @@ def build_lore_drive_content(item):
 
 
 def build_relationships_drive_content(project_id):
-    rels = CharacterRelationship.query.filter_by(project_id=project_id).all()
+    rels = get_valid_relationships(project_id)
     if not rels:
         return "No relationships yet."
     return '\n'.join(
@@ -662,6 +679,14 @@ def auth_callback():
     user.access_token  = tokens.get('access_token', '')
     user.refresh_token = tokens.get('refresh_token', getattr(user, 'refresh_token', ''))
     db.session.commit()
+    guest_session_id = session.get('guest_session_id')
+    if guest_session_id:
+        guest_projects = Project.query.filter_by(user_id=None, guest_session_id=guest_session_id).all()
+        for project in guest_projects:
+            project.user_id = user.id
+            project.guest_session_id = ''
+        if guest_projects:
+            db.session.commit()
     session['user_id'] = user.id
     session.permanent  = True
     setup_scripvia_folder(user)
@@ -686,12 +711,15 @@ def auth_me():
 
 @app.route('/api/projects', methods=['GET'])
 def get_projects():
-    maybe_claim_legacy_projects()
     user = get_current_user()
     if user:
-        projects = Project.query.filter_by(user_id=user.id).order_by(Project.updated_at.desc()).all()
+        projects = Project.query.filter(
+            (Project.user_id == user.id) | legacy_project_filter()
+        ).order_by(Project.updated_at.desc()).all()
     else:
-        projects = Project.query.filter_by(user_id=None, guest_session_id=get_guest_session_id()).order_by(Project.updated_at.desc()).all()
+        projects = Project.query.filter(
+            ((Project.user_id.is_(None)) & (Project.guest_session_id == get_guest_session_id())) | legacy_project_filter()
+        ).order_by(Project.updated_at.desc()).all()
     return jsonify([p.to_dict() for p in projects])
 
 
@@ -966,6 +994,9 @@ def delete_character(char_id):
     drive_file_id = char.drive_file_id
     drive_image_file_id = char.drive_image_file_id
     project_id = char.project_id
+    CharacterRelationship.query.filter(
+        (CharacterRelationship.char_a_id == char.id) | (CharacterRelationship.char_b_id == char.id)
+    ).delete(synchronize_session=False)
     db.session.delete(char)
     db.session.commit()
 
@@ -1267,7 +1298,7 @@ def update_notes(project_id):
 @app.route('/api/projects/<int:project_id>/relationships', methods=['GET'])
 def get_relationships(project_id):
     get_project_or_404(project_id)
-    return jsonify([r.to_dict() for r in CharacterRelationship.query.filter_by(project_id=project_id).all()])
+    return jsonify([r.to_dict() for r in get_valid_relationships(project_id)])
 
 
 @app.route('/api/projects/<int:project_id>/relationships', methods=['POST'])
@@ -1278,6 +1309,12 @@ def create_relationship(project_id):
         return jsonify({'error': 'Both characters required'}), 400
     if data['char_a_id'] == data['char_b_id']:
         return jsonify({'error': 'Cannot relate a character to themselves'}), 400
+    characters = Character.query.filter(
+        Character.project_id == project_id,
+        Character.id.in_([data['char_a_id'], data['char_b_id']])
+    ).all()
+    if len(characters) != 2:
+        return jsonify({'error': 'Both characters must belong to this project'}), 400
     rel = CharacterRelationship(project_id=project_id, char_a_id=data['char_a_id'],
                                 char_b_id=data['char_b_id'], relation_type=data.get('relation_type', ''),
                                 description=data.get('description', ''), color=data.get('color', '#7b6fb0'))
