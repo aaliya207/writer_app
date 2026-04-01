@@ -1,5 +1,6 @@
 const { app, BrowserWindow, shell } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { spawn } = require('child_process');
 const http = require('http');
 
@@ -12,6 +13,16 @@ const FLASK_TIMEOUT_MS = 30000; // give up after 30 s
 let mainWindow  = null;
 let flaskProcess = null;
 
+function getPackagedFlaskPath() {
+  const candidates = [
+    path.join(process.resourcesPath, 'app', 'app.exe'),
+    path.join(path.dirname(process.execPath), 'resources', 'app', 'app.exe'),
+    path.join(path.dirname(process.execPath), 'app', 'app.exe'),
+  ];
+
+  return candidates.find(candidate => fs.existsSync(candidate)) || candidates[0];
+}
+
 // ─── Flask launcher ───────────────────────────────────────────────────────────
 function startFlask() {
   const isProd = app.isPackaged;
@@ -19,10 +30,10 @@ function startFlask() {
   let flaskCmd, flaskArgs, flaskCwd;
 
   if (isProd) {
-  // ✅ PRODUCTION (after build)
-  flaskCmd = path.join(process.resourcesPath, 'app', 'app.exe');
-  flaskArgs = [];
-  flaskCwd = path.join(process.resourcesPath, 'app');
+    // ✅ PRODUCTION (after build)
+    flaskCmd = getPackagedFlaskPath();
+    flaskArgs = [];
+    flaskCwd = path.dirname(flaskCmd);
   } else {
     // ✅ DEV — run app.py with Python directly
     flaskCmd = 'python';
@@ -31,6 +42,10 @@ function startFlask() {
   }
 
   console.log('[Scripvia] Starting Flask:', flaskCmd);
+
+  if (isProd && !fs.existsSync(flaskCmd)) {
+    throw new Error(`Packaged Flask executable not found: ${flaskCmd}`);
+  }
 
   flaskProcess = spawn(flaskCmd, flaskArgs, {
     cwd: flaskCwd,
@@ -42,8 +57,22 @@ function startFlask() {
     },
   });
 
-  flaskProcess.stdout.on('data', d => console.log('[Flask]', d.toString()));
-  flaskProcess.stderr.on('data', d => console.error('[Flask]', d.toString()));
+  flaskProcess.on('error', (err) => {
+    console.error('[Scripvia] Flask process failed to start:', err.message);
+    flaskProcess = null;
+  });
+
+  flaskProcess.on('exit', (code, signal) => {
+    console.log('[Scripvia] Flask process exited', { code, signal });
+    flaskProcess = null;
+  });
+
+  if (flaskProcess.stdout) {
+    flaskProcess.stdout.on('data', d => console.log('[Flask]', d.toString()));
+  }
+  if (flaskProcess.stderr) {
+    flaskProcess.stderr.on('data', d => console.error('[Flask]', d.toString()));
+  }
 }
 
 // ─── Poll until Flask is ready ────────────────────────────────────────────────
@@ -106,10 +135,10 @@ function createWindow() {
 
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
-  startFlask();
   createWindow();
 
   try {
+    startFlask();
     await waitForFlask();
     console.log('[Scripvia] Flask ready — navigating to app');
 
@@ -140,20 +169,30 @@ app.on('window-all-closed', () => {
   app.quit();
 });
 
-app.on('before-quit', killFlask);
+app.on('before-quit', () => {
+  killFlask();
+});
 
 function killFlask() {
-  if (flaskProcess) {
-    console.log('[Scripvia] Killing Flask process');
-    try {
-      if (flaskProcess.pid && process.platform === 'win32') {
-        spawn('taskkill', ['/pid', String(flaskProcess.pid), '/f', '/t']);
-      } else if (flaskProcess.pid) {
-        flaskProcess.kill('SIGTERM');
-      }
-    } catch (e) {
-      console.error('[Scripvia] Error killing Flask:', e);
+  const child = flaskProcess;
+  if (!child || !child.pid) {
+    return;
+  }
+
+  console.log('[Scripvia] Killing Flask process', child.pid);
+
+  try {
+    if (process.platform === 'win32') {
+      const killer = spawn('taskkill', ['/pid', `${child.pid}`, '/f', '/t'], {
+        windowsHide: true,
+      });
+      killer.on('error', (e) => console.error('[Scripvia] Error running taskkill:', e.message));
+    } else {
+      child.kill('SIGTERM');
     }
+  } catch (e) {
+    console.error('[Scripvia] Error killing Flask:', e);
+  } finally {
     flaskProcess = null;
   }
 }
