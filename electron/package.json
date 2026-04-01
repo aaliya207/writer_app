@@ -31,7 +31,7 @@
     "extraResources": [
       {
         "from": "../dist/app/",
-        "to": "flask_app/",
+        "to": "app",
         "filter": ["**/*"]
       }
     ],

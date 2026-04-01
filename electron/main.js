@@ -19,10 +19,10 @@ function startFlask() {
   let flaskCmd, flaskArgs, flaskCwd;
 
   if (isProd) {
-    // ✅ PRODUCTION (after build)
-    flaskCmd = path.join(process.resourcesPath, 'flask_app', 'app.exe');
-    flaskArgs = [];
-    flaskCwd = path.join(process.resourcesPath, 'flask_app');
+  // ✅ PRODUCTION (after build)
+  flaskCmd = path.join(process.resourcesPath, 'app', 'app.exe');
+  flaskArgs = [];
+  flaskCwd = path.join(process.resourcesPath, 'app');
   } else {
     // ✅ DEV — run app.py with Python directly
     flaskCmd = 'python';
@@ -145,11 +145,14 @@ app.on('before-quit', killFlask);
 function killFlask() {
   if (flaskProcess) {
     console.log('[Scripvia] Killing Flask process');
-    // On Windows, kill() only kills the top-level process; use taskkill for the whole tree
-    if (process.platform === 'win32') {
-      spawn('taskkill', ['/pid', flaskProcess.pid.toString(), '/f', '/t']);
-    } else {
-      flaskProcess.kill('SIGTERM');
+    try {
+      if (flaskProcess.pid && process.platform === 'win32') {
+        spawn('taskkill', ['/pid', String(flaskProcess.pid), '/f', '/t']);
+      } else if (flaskProcess.pid) {
+        flaskProcess.kill('SIGTERM');
+      }
+    } catch (e) {
+      console.error('[Scripvia] Error killing Flask:', e);
     }
     flaskProcess = null;
   }
