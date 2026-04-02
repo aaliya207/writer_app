@@ -14,11 +14,13 @@ if hasattr(sys, '_MEIPASS'):
     os.chdir(sys._MEIPASS)
 
 sys.path.insert(0, resource_path('.'))
-from app import app, db
+from app import app, db, ensure_character_titles_column, ensure_lore_relationships_table
 
 def start_flask():
     with app.app_context():
         db.create_all()
+        ensure_character_titles_column()
+        ensure_lore_relationships_table()
     app.run(host='127.0.0.1', port=5000, debug=False, use_reloader=False, threaded=True)
 
 def wait_for_flask():

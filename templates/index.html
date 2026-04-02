@@ -11,7 +11,7 @@
     <link href="https://cdn.quilljs.com/1.3.7/quill.snow.css" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="icon"
-        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✍️</text></svg>">
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9997;&#65039;</text></svg>">
 </head>
 
 <body>
@@ -20,7 +20,7 @@
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
             <div class="logo">
-                <div class="logo-mark">S</div>
+                <div class="logo-mark">&#9997;&#65039;</div>
                 <span class="logo-text">Scripvia</span>
             </div>
             <button class="sidebar-toggle" id="sidebarToggle">
@@ -44,8 +44,8 @@
 
         <div class="project-detail" id="projectDetail" style="display:none;">
             <div class="project-detail-header">
-                <button class="btn-back" id="backToProjects">← Projects</button>
-                <button class="btn-back" id="backToOverview" style="display:none;">⊞ Overview</button>
+                <button class="btn-back" id="backToProjects">&larr; Projects</button>
+                <button class="btn-back" id="backToOverview" style="display:none;">Overview</button>
                 <span class="current-project-name" id="currentProjectName"></span>
             </div>
 
@@ -79,15 +79,19 @@
             </div>
 
             <div class="tab-content" id="tab-lore">
-                <div class="tab-actions">
+                <div class="tab-actions tab-actions-stack">
                     <button class="btn-tab-add" id="newLoreBtn">+ New Entry</button>
+                    <button class="btn-tab-add" id="newLoreRelBtn">+ Add Connection</button>
+                    <button class="btn-tab-add" id="viewLoreWebBtn">View Lore Web</button>
+                    <button class="btn-tab-add" id="viewLoreTimelineBtn">View Lore Timeline</button>
+                    <button class="btn-tab-add" id="viewLoreMapBtn">View Lore Map</button>
                 </div>
                 <ul class="item-list" id="loreList"></ul>
             </div>
 
             <div class="tab-content" id="tab-relationships">
                 <div class="tab-actions" style="display:flex;flex-direction:column;gap:6px;">
-                    <button class="btn-tab-add" id="viewRelWebBtn">✦ View Character Web</button>
+                    <button class="btn-tab-add" id="viewRelWebBtn">View Character Web</button>
                     <button class="btn-tab-add" id="newRelBtn">+ Add Relationship</button>
                 </div>
                 <ul class="item-list" id="relationshipsList"></ul>
@@ -112,13 +116,13 @@
                 <div class="user-info hidden" id="userInfo">
                     <img src="" alt="" class="user-avatar" id="userAvatar">
                     <span class="user-name" id="userName"></span>
-                    <a href="/auth/logout" class="btn-logout" title="Sign out">↪</a>
+                    <a href="/auth/logout" class="btn-logout" title="Sign out" aria-label="Sign out">&#8617;</a>
                 </div>
             </div>
             <div class="footer-bottom">
                 <button class="btn-ghost-sm" id="darkModeToggle">
-                    <span id="themeIcon">🌙</span>
-                    <span id="themeLabel">Dark</span>
+                    <span id="themeIcon">&#127769;</span>
+                    <span id="themeLabel">Dark Mode</span>
                 </button>
                 <span class="version">v0.2</span>
             </div>
@@ -165,15 +169,13 @@
                     <span id="ovCreated"></span>
                 </div>
                 <div class="overview-actions">
-                    <button class="ov-btn-primary" onclick="overviewGoTo('chapters')">✍️ Start Writing</button>
-                    <button class="ov-btn-ghost" id="ovCharBtn" onclick="overviewGoTo('characters')">👤
-                        Characters</button>
-                    <button class="ov-btn-ghost" id="ovSceneBtn" onclick="overviewGoTo('scenes')">⚡ Scenes</button>
-                    <button class="ov-btn-ghost" id="ovLoreBtn" onclick="overviewGoTo('lore')">📖 Lore</button>
-                    <button class="ov-btn-ghost" id="ovRelBtn" onclick="overviewGoTo('relationships')">🕸️ Character
-                        Web</button>
-                    <button class="ov-btn-ghost" onclick="exportProject('pdf')">↓ Export PDF</button>
-                    <button class="ov-btn-ghost" onclick="exportProject('docx')">↓ Export DOCX</button>
+                    <button class="ov-btn-primary" onclick="overviewGoTo('chapters')">Start Writing</button>
+                    <button class="ov-btn-ghost" id="ovCharBtn" onclick="overviewGoTo('characters')">Characters</button>
+                    <button class="ov-btn-ghost" id="ovSceneBtn" onclick="overviewGoTo('scenes')">Scenes</button>
+                    <button class="ov-btn-ghost" id="ovLoreBtn" onclick="overviewGoTo('lore')">Lore</button>
+                    <button class="ov-btn-ghost" id="ovRelBtn" onclick="overviewGoTo('relationships')">Character Web</button>
+                    <button class="ov-btn-ghost" onclick="exportProject('pdf')">Export PDF</button>
+                    <button class="ov-btn-ghost" onclick="exportProject('docx')">Export DOCX</button>
                 </div>
             </div>
         </div>
@@ -189,14 +191,11 @@
             </div>
             <div class="header-actions">
                 <span class="save-status" id="saveStatus"></span>
-                <button class="btn-ghost" id="exportPdfBtn" disabled>↓ PDF</button>
-                <button class="btn-ghost" id="exportDocxBtn" disabled>↓ DOCX</button>
-                <button class="btn-ghost" id="notesToggleBtn" style="display:none;" title="Project Notes">📝
-                    Notes</button>
-                <button class="btn-ghost" id="focusModeBtn" style="display:none;" title="Focus Mode (F11)">⛶
-                    Focus</button>
-                <button class="btn-ghost" id="searchBtn" style="display:none;" title="Search (Ctrl+K)">🔍
-                    Search</button>
+                <button class="btn-ghost" id="exportPdfBtn" disabled>PDF</button>
+                <button class="btn-ghost" id="exportDocxBtn" disabled>DOCX</button>
+                <button class="btn-ghost" id="notesToggleBtn" style="display:none;" title="Project Notes">Notes</button>
+                <button class="btn-ghost" id="focusModeBtn" style="display:none;" title="Focus Mode (F11)">Focus</button>
+                <button class="btn-ghost" id="searchBtn" style="display:none;" title="Search (Ctrl+K)">Search</button>
                 <button class="btn-save" id="saveBtn" disabled>Save & Sync</button>
             </div>
         </header>
@@ -205,11 +204,11 @@
             <div id="quillEditor"></div>
             <div class="editor-stats-bar" id="statsBar">
                 <span id="wordCount">0 words</span>
-                <span class="stats-divider">·</span>
+                <span class="stats-divider">|</span>
                 <span id="charCount">0 characters</span>
-                <span class="stats-divider">·</span>
+                <span class="stats-divider">|</span>
                 <span id="readTime">~0 min read</span>
-                <span class="stats-divider">·</span>
+                <span class="stats-divider">|</span>
                 <span id="lastSavedTime">Never saved</span>
             </div>
         </div>
@@ -222,13 +221,13 @@
                 <div class="welcome-logo-large">Scripvia</div>
                 <p class="welcome-tagline">Write anything. Remember everything.</p>
                 <div class="welcome-chips">
-                    <span class="chip">✦ Stories</span>
-                    <span class="chip">✦ Scripts</span>
-                    <span class="chip">✦ Journals</span>
-                    <span class="chip">✦ Notes</span>
-                    <span class="chip">✦ Worldbuilding</span>
+                    <span class="chip">Stories</span>
+                    <span class="chip">Scripts</span>
+                    <span class="chip">Journals</span>
+                    <span class="chip">Notes</span>
+                    <span class="chip">Worldbuilding</span>
                 </div>
-                <p class="welcome-hint">← Select or create a project to start writing</p>
+                <p class="welcome-hint">Select or create a project to start writing</p>
             </div>
         </div>
 
@@ -236,14 +235,14 @@
         <div class="notes-panel" id="notesPanel">
             <div class="notes-panel-header">
                 <div class="notes-panel-title">
-                    <span class="notes-icon">📝</span>
+                    <span class="notes-icon">&#128221;</span>
                     <span>Project Notes</span>
                 </div>
-                <button class="notes-close" id="notesPanelClose">×</button>
+                <button class="notes-close" id="notesPanelClose">&times;</button>
             </div>
             <div class="notes-panel-body">
                 <textarea class="notes-textarea" id="notesTextarea"
-                    placeholder="Jot down anything — ideas, reminders, plot holes, random thoughts..."></textarea>
+                    placeholder="Jot down anything - ideas, reminders, plot holes, random thoughts..."></textarea>
             </div>
             <div class="notes-panel-footer">
                 <span class="notes-save-status" id="notesSaveStatus"></span>
@@ -256,33 +255,99 @@
     <!-- Character Relationship Web -->
     <div class="rel-web-overlay" id="relWebOverlay" style="display:none;">
         <div class="rel-web-header">
-            <div class="rel-web-title">
-                <span>✦</span>
+            <div class="rel-web-title"><span>&#128375;&#65039;</span>
                 <span id="relWebProjectName">Character Web</span>
             </div>
             <div class="rel-web-actions">
                 <button class="btn-ghost" id="relWebAddBtn">+ Add Relationship</button>
-                <button class="rel-web-close" id="relWebClose">×</button>
+                <button class="rel-web-close" id="relWebClose">&times;</button>
             </div>
         </div>
         <canvas id="relWebCanvas"></canvas>
         <div class="rel-web-bottom">
             <div class="rel-zoom-controls">
                 <button class="rel-zoom-btn" onclick="relZoomIn()">+</button>
-                <button class="rel-zoom-btn" onclick="relZoomReset()">⊙</button>
-                <button class="rel-zoom-btn" onclick="relZoomOut()">−</button>
+                <button class="rel-zoom-btn" onclick="relZoomReset()">Reset</button>
+                <button class="rel-zoom-btn" onclick="relZoomOut()">-</button>
             </div>
-            <div class="rel-web-hint">Scroll to zoom · Drag canvas to pan · Click connection to edit</div>
+            <div class="rel-web-hint">Scroll to zoom | Drag canvas to pan | Click connection to edit</div>
+        </div>
+    </div>
+
+    <!-- Lore Web -->
+    <div class="rel-web-overlay" id="loreWebOverlay" style="display:none;">
+        <div class="rel-web-header">
+            <div class="rel-web-title"><span>&#128214;</span><span id="loreWebProjectName">Lore Web</span>
+            </div>
+            <div class="rel-web-actions">
+                <button class="btn-ghost" id="loreWebAddBtn">+ Add Connection</button>
+                <button class="rel-web-close" id="loreWebClose">&times;</button>
+            </div>
+        </div>
+        <canvas id="loreWebCanvas"></canvas>
+        <div class="rel-web-bottom">
+            <div class="rel-zoom-controls">
+                <button class="rel-zoom-btn" onclick="loreZoomIn()">+</button>
+                <button class="rel-zoom-btn" onclick="loreZoomReset()">Reset</button>
+                <button class="rel-zoom-btn" onclick="loreZoomOut()">-</button>
+            </div>
+            <div class="rel-web-hint">Scroll to zoom | Drag canvas to pan | Click connection to edit | Double-click a lore node to connect it</div>
+        </div>
+    </div>
+
+    <!-- Lore Timeline -->
+    <div class="rel-web-overlay" id="loreTimelineOverlay" style="display:none;">
+        <div class="rel-web-header">
+            <div class="rel-web-title"><span>&#128197;</span><span id="loreTimelineProjectName">Lore Timeline</span>
+            </div>
+            <div class="rel-web-actions">
+                <select class="modal-select lore-timeline-select" id="loreTimelineCategoryFilter">
+                    <option value="all">All Event Lore</option>
+                    <option value="event">&#128197; Historical Event</option>
+                    <option value="place">&#128506;&#65039; Place / Location</option>
+                    <option value="organization">&#127963;&#65039; Organization / Faction</option>
+                    <option value="concept">&#10024; Concept / Magic / Power</option>
+                    <option value="creature">&#128009; Creature / Species</option>
+                    <option value="item">&#9876;&#65039; Item / Object</option>
+                    <option value="other">&#128204; Other</option>
+                </select>
+                <input type="text" class="modal-input lore-timeline-search" id="loreTimelineSearch" placeholder="Filter timeline...">
+                <button class="rel-web-close" id="loreTimelineClose">&times;</button>
+            </div>
+        </div>
+        <div class="lore-timeline" id="loreTimeline"></div>
+    </div>
+
+    <!-- Lore Map -->
+    <div class="rel-web-overlay" id="loreMapOverlay" style="display:none;">
+        <div class="rel-web-header">
+            <div class="rel-web-title"><span>&#128506;&#65039;</span><span id="loreMapProjectName">Lore Map</span>
+            </div>
+            <div class="rel-web-actions">
+                <button class="btn-ghost" id="loreMapHelpBtn" type="button">Drag Places</button>
+                <button class="rel-web-close" id="loreMapClose">&times;</button>
+            </div>
+        </div>
+        <div class="lore-map-wrap">
+            <div class="lore-map-board" id="loreMapBoard">
+                <svg class="lore-map-lines" id="loreMapLines"></svg>
+                <div class="lore-map-grid"></div>
+            </div>
+            <aside class="lore-map-side" id="loreMapSide">
+                <div class="lore-map-side-title">Places</div>
+                <div class="lore-map-side-copy">Drag location nodes to place them where they make sense in your world.</div>
+                <div class="lore-map-list" id="loreMapList"></div>
+            </aside>
         </div>
     </div>
 
     <!-- Wiki Tooltip -->
     <div class="wiki-tooltip" id="wikiTooltip" style="display:none;">
         <div class="wiki-card">
-            <button class="wiki-card-close" id="wikiCardClose">×</button>
+            <button class="wiki-card-close" id="wikiCardClose">&times;</button>
             <div class="wiki-card-img-wrap" id="wikiCardImgWrap">
                 <img src="" alt="" id="wikiTooltipImgEl" class="wiki-card-img">
-                <div class="wiki-card-img-placeholder" id="wikiCardPlaceholder">✦</div>
+                <div class="wiki-card-img-placeholder" id="wikiCardPlaceholder">Info</div>
             </div>
             <div class="wiki-card-content">
                 <div class="wiki-card-flow" id="wikiCardFlow">
@@ -307,7 +372,7 @@
     <div class="search-overlay" id="searchOverlay">
         <div class="search-box">
             <div class="search-input-wrap">
-                <span class="search-icon">🔍</span>
+                <span class="search-icon">&#128269;</span>
                 <input type="text" class="search-input" id="searchInput"
                     placeholder="Search chapters, characters, lore, scenes...">
                 <kbd class="search-esc">Esc</kbd>
@@ -316,8 +381,8 @@
                 <div class="search-empty" id="searchEmpty">Start typing to search across your project...</div>
             </div>
             <div class="search-footer">
-                <span>↑↓ navigate</span>
-                <span>↵ open</span>
+                <span>Arrow keys navigate</span>
+                <span>Enter open</span>
                 <span>Esc close</span>
             </div>
         </div>
@@ -328,29 +393,28 @@
         <div class="modal">
             <div class="modal-header">
                 <h2 class="modal-title">New Project</h2>
-                <button class="modal-close" id="cancelProjectBtn">×</button>
+                <button class="modal-close" id="cancelProjectBtn">&times;</button>
             </div>
             <label class="modal-label">Title</label>
             <input type="text" class="modal-input" id="projectTitleInput"
                 placeholder="e.g. The Last City, Modern Love...">
             <label class="modal-label">Genre</label>
             <select class="modal-select" id="projectGenreInput">
-                <option value="general">📝 General / Notes</option>
-                <option value="fiction">📖 Fiction</option>
-                <option value="fantasy">⚔️ Fantasy</option>
-                <option value="sci-fi">🚀 Sci-Fi</option>
-                <option value="romance">💕 Romance</option>
-                <option value="mystery">🔍 Mystery</option>
-                <option value="thriller">⚡ Thriller</option>
-                <option value="horror">🕯️ Horror</option>
-                <option value="historical">🏛️ Historical Fiction</option>
-                <option value="journal">📓 Journal / Diary</option>
-                <option value="screenplay">🎬 Screenplay</option>
-                <option value="poetry">✨ Poetry</option>
-                <option value="other">📌 Other</option>
+                <option value="general">&#128221; General / Notes</option>
+                <option value="fiction">&#128214; Fiction</option>
+                <option value="fantasy">&#9876;&#65039; Fantasy</option>
+                <option value="sci-fi">&#128640; Sci-Fi</option>
+                <option value="romance">&#128149; Romance</option>
+                <option value="mystery">&#128269; Mystery</option>
+                <option value="thriller">&#9889; Thriller</option>
+                <option value="horror">&#128367;&#65039; Horror</option>
+                <option value="historical">&#127963;&#65039; Historical Fiction</option>
+                <option value="journal">&#128211; Journal / Diary</option>
+                <option value="screenplay">&#127916; Screenplay</option>
+                <option value="poetry">&#10024; Poetry</option>
+                <option value="other">&#128204; Other</option>
             </select>
-            <p class="modal-genre-note" id="genreNote" style="display:none;">✦ This genre unlocks Characters, Scenes and
-                Lore tabs</p>
+            <p class="modal-genre-note" id="genreNote" style="display:none;">&#10022; This genre unlocks Characters, Scenes and Lore tabs</p>
             <label class="modal-label">Description <span class="optional">(optional)</span></label>
             <textarea class="modal-textarea" id="projectDescInput" placeholder="What's this project about?"></textarea>
             <div class="modal-actions">
@@ -365,7 +429,7 @@
         <div class="modal">
             <div class="modal-header">
                 <h2 class="modal-title">New Chapter</h2>
-                <button class="modal-close" id="cancelDocBtnX">×</button>
+                <button class="modal-close" id="cancelDocBtnX">&times;</button>
             </div>
             <label class="modal-label">Title</label>
             <input type="text" class="modal-input" id="docTitleModalInput"
@@ -382,7 +446,7 @@
         <div class="modal modal-wide">
             <div class="modal-header">
                 <h2 class="modal-title">New Character</h2>
-                <button class="modal-close" id="cancelCharBtnX">×</button>
+                <button class="modal-close" id="cancelCharBtnX">&times;</button>
             </div>
             <div class="modal-two-col">
                 <div>
@@ -390,15 +454,15 @@
                     <input type="text" class="modal-input" id="charNameInput" placeholder="Character name">
                     <label class="modal-label">Role</label>
                     <select class="modal-select" id="charRoleInput">
-                        <option value="Main Lead">👑 Main Lead</option>
-                        <option value="Second Lead">⭐ Second Lead</option>
-                        <option value="Love Interest">💕 Love Interest</option>
-                        <option value="Villain">🖤 Villain</option>
-                        <option value="Support Role">🤝 Support Role</option>
-                        <option value="Mentor / Guide">🧭 Mentor / Guide</option>
-                        <option value="Comic Relief">😄 Comic Relief</option>
-                        <option value="Side Character">📌 Side Character</option>
-                        <option value="Other">✦ Other</option>
+                        <option value="Main Lead">&#128081; Main Lead</option>
+                        <option value="Second Lead">&#11088; Second Lead</option>
+                        <option value="Love Interest">&#128149; Love Interest</option>
+                        <option value="Villain">&#128420; Villain</option>
+                        <option value="Support Role">&#129309; Support Role</option>
+                        <option value="Mentor / Guide">&#129517; Mentor / Guide</option>
+                        <option value="Comic Relief">&#128516; Comic Relief</option>
+                        <option value="Side Character">&#128204; Side Character</option>
+                        <option value="other">&#10022; Other</option>
                     </select>
                     <label class="modal-label">Age</label>
                     <input type="text" class="modal-input" id="charAgeInput" placeholder="e.g. 24, early 30s...">
@@ -411,11 +475,11 @@
                     <div class="img-input-wrap">
                         <input type="text" class="modal-input" id="charImageInput"
                             placeholder="Paste URL or upload below...">
-                        <label class="btn-upload" for="charImageFile">📁 Upload from device</label>
+                        <label class="btn-upload" for="charImageFile">&#128194; Upload from device</label>
                         <input type="file" id="charImageFile" accept="image/*" style="display:none;">
                         <div class="img-preview-wrap" id="charImgPreview" style="display:none;">
                             <img id="charImgPreviewEl" src="" alt="preview">
-                            <button class="btn-clear-img" id="clearCharImg">× Remove</button>
+                            <button class="btn-clear-img" id="clearCharImg">&times; Remove</button>
                         </div>
                     </div>
                 </div>
@@ -438,22 +502,22 @@
         <div class="modal">
             <div class="modal-header">
                 <h2 class="modal-title">New Scene</h2>
-                <button class="modal-close" id="cancelSceneBtnX">×</button>
+                <button class="modal-close" id="cancelSceneBtnX">&times;</button>
             </div>
             <label class="modal-label">Title</label>
             <input type="text" class="modal-input" id="sceneTitleInput"
                 placeholder="e.g. The confrontation at the bridge...">
             <label class="modal-label">Mood <span class="optional">(optional)</span></label>
             <select class="modal-select" id="sceneMoodInput">
-                <option value="">— select mood —</option>
-                <option value="tense">⚡ Tense</option>
-                <option value="romantic">💕 Romantic</option>
-                <option value="mysterious">🌫️ Mysterious</option>
-                <option value="action">🔥 Action</option>
-                <option value="sad">💧 Sad</option>
-                <option value="hopeful">🌅 Hopeful</option>
-                <option value="dark">🌑 Dark</option>
-                <option value="comedic">😄 Comedic</option>
+                <option value="">&#8212; select mood &#8212;</option>
+                <option value="tense">&#9889; Tense</option>
+                <option value="romantic">&#128149; Romantic</option>
+                <option value="mysterious">&#127787;&#65039; Mysterious</option>
+                <option value="action">&#128293; Action</option>
+                <option value="sad">&#128167; Sad</option>
+                <option value="hopeful">&#127749; Hopeful</option>
+                <option value="dark">&#127761; Dark</option>
+                <option value="comedic">&#128516; Comedic</option>
             </select>
             <div class="modal-actions">
                 <button class="btn-ghost" id="cancelSceneBtn">Cancel</button>
@@ -467,31 +531,52 @@
         <div class="modal">
             <div class="modal-header">
                 <h2 class="modal-title">New Lore Entry</h2>
-                <button class="modal-close" id="cancelLoreBtnX">×</button>
+                <button class="modal-close" id="cancelLoreBtnX">&times;</button>
             </div>
             <label class="modal-label">Name *</label>
             <input type="text" class="modal-input" id="loreNameInput" placeholder="e.g. The Sealed God, Jaeyakdae...">
             <label class="modal-label">Category</label>
             <select class="modal-select" id="loreCategoryInput">
-                <option value="item">⚔️ Item / Object</option>
-                <option value="place">🗺️ Place / Location</option>
-                <option value="organization">🏛️ Organization / Faction</option>
-                <option value="concept">✨ Concept / Magic / Power</option>
-                <option value="creature">🐉 Creature / Species</option>
-                <option value="event">📅 Historical Event</option>
-                <option value="other">📌 Other</option>
+                <option value="item">&#9876;&#65039; Item / Object</option>
+                <option value="place">&#128506;&#65039; Place / Location</option>
+                <option value="organization">&#127963;&#65039; Organization / Faction</option>
+                <option value="concept">&#10024; Concept / Magic / Power</option>
+                <option value="creature">&#128009; Creature / Species</option>
+                <option value="event">&#128197; Historical Event</option>
+                <option value="other">&#128204; Other</option>
+                <option value="custom">&#10022; Custom</option>
             </select>
+            <input type="text" class="modal-input" id="loreCustomCategoryInput" placeholder="Write your custom lore category..." style="display:none;">
             <label class="modal-label">Description</label>
             <textarea class="modal-textarea" id="loreDescInput"
                 placeholder="What is this? What does it do? Why does it matter?"></textarea>
+            <label class="modal-label">Timeline Date <span class="optional">(best for event lore)</span></label>
+            <input type="text" class="modal-input" id="loreEventDateInput" placeholder="e.g. 300 years ago, Year 42, Before the fall...">
+            <label class="modal-label">Timeline Order <span class="optional">(smaller comes first)</span></label>
+            <input type="number" class="modal-input" id="loreEventOrderInput" placeholder="0">
+            <label class="modal-label">Map Position <span class="optional">(for places)</span></label>
+            <div class="lore-map-coords">
+                <div>
+                    <span class="lore-map-coord-label">Horizontal</span>
+                    <input type="range" id="loreMapXInput" min="0" max="100" value="50">
+                </div>
+                <div>
+                    <span class="lore-map-coord-label">Vertical</span>
+                    <input type="range" id="loreMapYInput" min="0" max="100" value="50">
+                </div>
+            </div>
+            <div class="lore-map-coord-values">
+                <span id="loreMapXValue">50%</span>
+                <span id="loreMapYValue">50%</span>
+            </div>
             <label class="modal-label">Image <span class="optional">(optional)</span></label>
             <div class="img-input-wrap">
                 <input type="text" class="modal-input" id="loreImageInput" placeholder="Paste URL or upload below...">
-                <label class="btn-upload" for="loreImageFile">📁 Upload from device</label>
+                <label class="btn-upload" for="loreImageFile">&#128194; Upload from device</label>
                 <input type="file" id="loreImageFile" accept="image/*" style="display:none;">
                 <div class="img-preview-wrap" id="loreImgPreview" style="display:none;">
                     <img id="loreImgPreviewEl" src="" alt="preview">
-                    <button class="btn-clear-img" id="clearLoreImg">× Remove</button>
+                    <button class="btn-clear-img" id="clearLoreImg">&times; Remove</button>
                 </div>
             </div>
             <div class="modal-actions">
@@ -501,26 +586,88 @@
         </div>
     </div>
 
+    <!-- Add Lore Connection Modal -->
+    <div class="modal-overlay" id="newLoreRelModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 class="modal-title">Add Lore Connection</h2>
+                <button class="modal-close" id="cancelLoreRelBtnX">&times;</button>
+            </div>
+            <label class="modal-label">Lore Item A *</label>
+            <select class="modal-select" id="loreRelAInput"></select>
+            <label class="modal-label">Connection Type</label>
+            <select class="modal-select" id="loreRelTypeInput"></select>
+            <label class="modal-label">Lore Item B *</label>
+            <select class="modal-select" id="loreRelBInput"></select>
+            <label class="modal-label">Description <span class="optional">(optional)</span></label>
+            <textarea class="modal-textarea" id="loreRelDescInput" placeholder="Explain how these entries connect..."></textarea>
+            <label class="modal-label">Color</label>
+            <div class="rel-color-picker" id="loreRelColorPicker">
+                <div class="rel-color-opt selected" data-color="#5f8fd6" style="background:#5f8fd6;"></div>
+                <div class="rel-color-opt" data-color="#78b86f" style="background:#78b86f;"></div>
+                <div class="rel-color-opt" data-color="#c9785d" style="background:#c9785d;"></div>
+                <div class="rel-color-opt" data-color="#8e73d8" style="background:#8e73d8;"></div>
+                <div class="rel-color-opt" data-color="#d2a854" style="background:#d2a854;"></div>
+                <div class="rel-color-opt" data-color="#cc6f9f" style="background:#cc6f9f;"></div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-ghost" id="cancelLoreRelBtn">Cancel</button>
+                <button class="btn-primary-sm" id="confirmLoreRelBtn">Add Connection</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Lore Connection Modal -->
+    <div class="modal-overlay" id="editLoreRelModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 class="modal-title">Edit Lore Connection</h2>
+                <button class="modal-close" id="cancelEditLoreRelBtnX">&times;</button>
+            </div>
+            <div class="modal-label" id="editLoreRelNames"
+                style="font-size:14px;color:var(--text-primary);margin-bottom:16px;text-transform:none;letter-spacing:0;"></div>
+            <label class="modal-label">Connection Type</label>
+            <select class="modal-select" id="editLoreRelTypeInput"></select>
+            <label class="modal-label">Description <span class="optional">(optional)</span></label>
+            <textarea class="modal-textarea" id="editLoreRelDescInput" placeholder="Explain how these entries connect..."></textarea>
+            <label class="modal-label">Color</label>
+            <div class="rel-color-picker" id="editLoreRelColorPicker">
+                <div class="rel-color-opt selected" data-color="#5f8fd6" style="background:#5f8fd6;"></div>
+                <div class="rel-color-opt" data-color="#78b86f" style="background:#78b86f;"></div>
+                <div class="rel-color-opt" data-color="#c9785d" style="background:#c9785d;"></div>
+                <div class="rel-color-opt" data-color="#8e73d8" style="background:#8e73d8;"></div>
+                <div class="rel-color-opt" data-color="#d2a854" style="background:#d2a854;"></div>
+                <div class="rel-color-opt" data-color="#cc6f9f" style="background:#cc6f9f;"></div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-confirm-delete" id="deleteLoreRelFromEditBtn">Delete</button>
+                <div style="flex:1;"></div>
+                <button class="btn-ghost" id="cancelEditLoreRelBtn">Cancel</button>
+                <button class="btn-primary-sm" id="confirmEditLoreRelBtn">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Add Relationship Modal -->
     <div class="modal-overlay" id="newRelModal">
         <div class="modal">
             <div class="modal-header">
                 <h2 class="modal-title">Add Relationship</h2>
-                <button class="modal-close" id="cancelRelBtnX">×</button>
+                <button class="modal-close" id="cancelRelBtnX">&times;</button>
             </div>
             <label class="modal-label">Character A *</label>
             <select class="modal-select" id="relCharAInput"></select>
             <label class="modal-label">Relationship Type</label>
             <select class="modal-select" id="relTypeInput">
-                <option value="allies">🤝 Allies</option>
-                <option value="rivals">⚔️ Rivals</option>
-                <option value="lovers">💕 Lovers</option>
-                <option value="enemies">🖤 Enemies</option>
-                <option value="family">👨‍👩‍👧 Family</option>
-                <option value="mentor">🧭 Mentor / Student</option>
-                <option value="friends">😊 Friends</option>
-                <option value="complicated">🌀 Complicated</option>
-                <option value="strangers">👥 Strangers</option>
+                <option value="allies">&#129309; Allies</option>
+                <option value="rivals">&#9876;&#65039; Rivals</option>
+                <option value="lovers">&#128149; Lovers</option>
+                <option value="enemies">&#128420; Enemies</option>
+                <option value="family">&#128104;&#8205;&#128105;&#8205;&#128103; Family</option>
+                <option value="mentor">&#129517; Mentor / Student</option>
+                <option value="friends">&#128522; Friends</option>
+                <option value="complicated">&#127744; Complicated</option>
+                <option value="strangers">&#128101; Strangers</option>
             </select>
             <label class="modal-label">Character B *</label>
             <select class="modal-select" id="relCharBInput"></select>
@@ -547,22 +694,22 @@
         <div class="modal">
             <div class="modal-header">
                 <h2 class="modal-title">Edit Relationship</h2>
-                <button class="modal-close" id="cancelEditRelBtnX">×</button>
+                <button class="modal-close" id="cancelEditRelBtnX">&times;</button>
             </div>
             <div class="modal-label" id="editRelCharNames"
                 style="font-size:14px;color:var(--text-primary);margin-bottom:16px;text-transform:none;letter-spacing:0;">
             </div>
             <label class="modal-label">Relationship Type</label>
             <select class="modal-select" id="editRelTypeInput">
-                <option value="allies">🤝 Allies</option>
-                <option value="rivals">⚔️ Rivals</option>
-                <option value="lovers">💕 Lovers</option>
-                <option value="enemies">🖤 Enemies</option>
-                <option value="family">👨‍👩‍👧 Family</option>
-                <option value="mentor">🧭 Mentor / Student</option>
-                <option value="friends">😊 Friends</option>
-                <option value="complicated">🌀 Complicated</option>
-                <option value="strangers">👥 Strangers</option>
+                <option value="allies">&#129309; Allies</option>
+                <option value="rivals">&#9876;&#65039; Rivals</option>
+                <option value="lovers">&#128149; Lovers</option>
+                <option value="enemies">&#128420; Enemies</option>
+                <option value="family">&#128104;&#8205;&#128105;&#8205;&#128103; Family</option>
+                <option value="mentor">&#129517; Mentor / Student</option>
+                <option value="friends">&#128522; Friends</option>
+                <option value="complicated">&#127744; Complicated</option>
+                <option value="strangers">&#128101; Strangers</option>
             </select>
             <label class="modal-label">Description <span class="optional">(optional)</span></label>
             <textarea class="modal-textarea" id="editRelDescInput"
@@ -589,7 +736,7 @@
         <div class="modal crop-modal">
             <div class="modal-header">
                 <h2 class="modal-title">Crop Image</h2>
-                <button class="modal-close" id="cropModalClose">×</button>
+                <button class="modal-close" id="cropModalClose">&times;</button>
             </div>
             <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Drag to select the area you want to
                 keep.</p>
@@ -598,7 +745,7 @@
             </div>
             <div class="modal-actions" style="margin-top:16px;">
                 <button class="btn-ghost" id="cropCancelBtn">Cancel</button>
-                <button class="btn-primary-sm" id="cropConfirmBtn">✓ Use This Crop</button>
+                <button class="btn-primary-sm" id="cropConfirmBtn">&#10003; Use This Crop</button>
             </div>
         </div>
     </div>

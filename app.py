@@ -78,6 +78,7 @@ class Project(db.Model):
     scenes          = db.relationship('Scene',     backref='project', lazy=True, cascade='all, delete-orphan')
     lore_items      = db.relationship('LoreItem',  backref='project', lazy=True, cascade='all, delete-orphan')
     notes           = db.relationship('Note',      backref='project', lazy=True, cascade='all, delete-orphan')
+    lore_relationships = db.relationship('LoreRelationship', backref='project', lazy=True, cascade='all, delete-orphan')
     CREATIVE_GENRES = CREATIVE_GENRES
 
     def to_dict(self):
@@ -173,9 +174,13 @@ class LoreItem(db.Model):
     name        = db.Column(db.String(200), nullable=False)
     category    = db.Column(db.String(100), default='item')
     description = db.Column(db.Text, default='')
-    image_url    = db.Column(db.String(500), default='')
-    image_focus  = db.Column(db.String(20), default='center')
-    extra_notes  = db.Column(db.Text, default='')
+    image_url   = db.Column(db.String(500), default='')
+    image_focus = db.Column(db.String(20), default='center')
+    extra_notes = db.Column(db.Text, default='')
+    event_date  = db.Column(db.String(120), default='')
+    event_order = db.Column(db.Integer, default=0)
+    map_x       = db.Column(db.Float, default=50.0)
+    map_y       = db.Column(db.Float, default=50.0)
     drive_file_id = db.Column(db.String(200), default='')
     drive_image_file_id = db.Column(db.String(200), default='')
     created_at  = db.Column(db.DateTime, default=datetime.utcnow)
@@ -185,6 +190,8 @@ class LoreItem(db.Model):
             'id': self.id, 'project_id': self.project_id, 'name': self.name,
             'category': self.category, 'description': self.description,
             'image_url': self.image_url, 'image_focus': self.image_focus, 'extra_notes': self.extra_notes,
+            'event_date': self.event_date, 'event_order': self.event_order,
+            'map_x': self.map_x, 'map_y': self.map_y,
             'drive_file_id': self.drive_file_id, 'drive_image_file_id': self.drive_image_file_id,
             'created_at': self.created_at.isoformat()
         }
@@ -219,6 +226,31 @@ class CharacterRelationship(db.Model):
             'char_a_name': self.char_a.name if self.char_a else '',
             'char_b_name': self.char_b.name if self.char_b else '',
             'relation_type': self.relation_type, 'description': self.description, 'color': self.color
+        }
+
+
+class LoreRelationship(db.Model):
+    id            = db.Column(db.Integer, primary_key=True)
+    project_id    = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
+    lore_a_id     = db.Column(db.Integer, db.ForeignKey('lore_item.id'), nullable=False)
+    lore_b_id     = db.Column(db.Integer, db.ForeignKey('lore_item.id'), nullable=False)
+    relation_type = db.Column(db.String(100), default='')
+    description   = db.Column(db.Text, default='')
+    color         = db.Column(db.String(20), default='#5f8fd6')
+    lore_a        = db.relationship('LoreItem', foreign_keys=[lore_a_id], overlaps="lore_b")
+    lore_b        = db.relationship('LoreItem', foreign_keys=[lore_b_id], overlaps="lore_a")
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'project_id': self.project_id,
+            'lore_a_id': self.lore_a_id,
+            'lore_b_id': self.lore_b_id,
+            'lore_a_name': self.lore_a.name if self.lore_a else '',
+            'lore_b_name': self.lore_b.name if self.lore_b else '',
+            'relation_type': self.relation_type,
+            'description': self.description,
+            'color': self.color
         }
 
 
@@ -338,6 +370,22 @@ def get_valid_relationships(project_id):
         if not rel.char_a or not rel.char_b
         or rel.char_a.project_id != project_id
         or rel.char_b.project_id != project_id
+    ]
+    if invalid_rels:
+        for rel in invalid_rels:
+            db.session.delete(rel)
+        db.session.commit()
+    invalid_ids = {rel.id for rel in invalid_rels}
+    return [rel for rel in rels if rel.id not in invalid_ids]
+
+
+def get_valid_lore_relationships(project_id):
+    rels = LoreRelationship.query.filter_by(project_id=project_id).all()
+    invalid_rels = [
+        rel for rel in rels
+        if not rel.lore_a or not rel.lore_b
+        or rel.lore_a.project_id != project_id
+        or rel.lore_b.project_id != project_id
     ]
     if invalid_rels:
         for rel in invalid_rels:
@@ -547,6 +595,9 @@ def build_lore_drive_content(item):
         f"Name: {item.name}\n"
         f"Category: {item.category or 'item'}\n\n"
         f"Description:\n{item.description or ''}\n\n"
+        f"Timeline Date: {item.event_date or 'None'}\n"
+        f"Timeline Order: {item.event_order or 0}\n"
+        f"Map Position: ({item.map_x:.1f}, {item.map_y:.1f})\n\n"
         f"Notes:\n{item.extra_notes or ''}"
     )
 
@@ -557,6 +608,16 @@ def build_relationships_drive_content(project_id):
         return "No relationships yet."
     return '\n'.join(
         f"{rel.char_a.name if rel.char_a else ''} {format_relation_text(rel.relation_type)} {rel.char_b.name if rel.char_b else ''}".strip()
+        for rel in rels
+    )
+
+
+def build_lore_relationships_drive_content(project_id):
+    rels = get_valid_lore_relationships(project_id)
+    if not rels:
+        return "No lore connections yet."
+    return '\n'.join(
+        f"{rel.lore_a.name if rel.lore_a else ''} {format_relation_text(rel.relation_type)} {rel.lore_b.name if rel.lore_b else ''}".strip()
         for rel in rels
     )
 
@@ -574,6 +635,19 @@ def sync_project_relationships_to_drive(user, project):
         drive,
         'relationships',
         build_relationships_drive_content(project.id),
+        folders['web']
+    )
+
+
+def sync_project_lore_relationships_to_drive(user, project):
+    drive = get_drive_service(user)
+    folders = ensure_project_drive_structure(drive, user, project)
+    if 'web' not in folders:
+        return
+    upsert_drive_text_file(
+        drive,
+        'lore_connections',
+        build_lore_relationships_drive_content(project.id),
         folders['web']
     )
 
@@ -1136,9 +1210,18 @@ def create_lore(project_id):
     data = request.get_json()
     if not data or not data.get('name'):
         return jsonify({'error': 'Name required'}), 400
-    item = LoreItem(project_id=project_id, name=data['name'], category=data.get('category', 'item'),
-                    description=data.get('description', ''), image_url=data.get('image_url', ''),
-                    extra_notes=data.get('extra_notes', ''))
+    item = LoreItem(
+        project_id=project_id,
+        name=data['name'],
+        category=data.get('category', 'item'),
+        description=data.get('description', ''),
+        image_url=data.get('image_url', ''),
+        extra_notes=data.get('extra_notes', ''),
+        event_date=data.get('event_date', ''),
+        event_order=int(data.get('event_order') or 0),
+        map_x=float(data.get('map_x') or 50),
+        map_y=float(data.get('map_y') or 50)
+    )
     db.session.add(item)
     db.session.commit()
 
@@ -1180,8 +1263,15 @@ def update_lore_item(item_id):
     item = LoreItem.query.get_or_404(item_id)
     get_project_or_404(item.project_id)
     data = request.get_json()
-    for f in ['name','category','description','image_url','extra_notes']:
-        if f in data: setattr(item, f, data[f])
+    for f in ['name', 'category', 'description', 'image_url', 'extra_notes', 'event_date']:
+        if f in data:
+            setattr(item, f, data[f])
+    if 'event_order' in data:
+        item.event_order = int(data.get('event_order') or 0)
+    if 'map_x' in data:
+        item.map_x = float(data.get('map_x') or 0)
+    if 'map_y' in data:
+        item.map_y = float(data.get('map_y') or 0)
     db.session.commit()
 
     user = get_current_user()
@@ -1219,6 +1309,9 @@ def delete_lore_item(item_id):
     get_project_or_404(item.project_id)
     drive_file_id = item.drive_file_id
     drive_image_file_id = item.drive_image_file_id
+    LoreRelationship.query.filter(
+        (LoreRelationship.lore_a_id == item.id) | (LoreRelationship.lore_b_id == item.id)
+    ).delete(synchronize_session=False)
     db.session.delete(item)
     db.session.commit()
 
@@ -1385,6 +1478,108 @@ def delete_relationship(rel_id):
                     sync_project_relationships_to_drive(u, p)
                 except Exception as e:
                     print(f"Relationship Drive delete sync error: {e}")
+        drive_bg(_bg, app, project_id, user.id)
+    return jsonify({'message': 'Deleted'})
+
+
+# --- LORE RELATIONSHIPS ---
+
+@app.route('/api/projects/<int:project_id>/lore-relationships', methods=['GET'])
+def get_lore_relationships(project_id):
+    get_project_or_404(project_id)
+    return jsonify([r.to_dict() for r in get_valid_lore_relationships(project_id)])
+
+
+@app.route('/api/projects/<int:project_id>/lore-relationships', methods=['POST'])
+def create_lore_relationship(project_id):
+    get_project_or_404(project_id)
+    data = request.get_json()
+    if not data or not data.get('lore_a_id') or not data.get('lore_b_id'):
+        return jsonify({'error': 'Both lore entries required'}), 400
+    if data['lore_a_id'] == data['lore_b_id']:
+        return jsonify({'error': 'Cannot connect a lore item to itself'}), 400
+    lore_items = LoreItem.query.filter(
+        LoreItem.project_id == project_id,
+        LoreItem.id.in_([data['lore_a_id'], data['lore_b_id']])
+    ).all()
+    if len(lore_items) != 2:
+        return jsonify({'error': 'Both lore entries must belong to this project'}), 400
+    rel = LoreRelationship(
+        project_id=project_id,
+        lore_a_id=data['lore_a_id'],
+        lore_b_id=data['lore_b_id'],
+        relation_type=data.get('relation_type', 'related to'),
+        description=data.get('description', ''),
+        color=data.get('color', '#5f8fd6')
+    )
+    db.session.add(rel)
+    db.session.commit()
+
+    user = get_current_user()
+    if user and user.access_token:
+        def _bg(app, pid, uid):
+            with app.app_context():
+                u = User.query.get(uid)
+                p = Project.query.get(pid)
+                if not u or not p:
+                    return
+                try:
+                    sync_project_lore_relationships_to_drive(u, p)
+                except Exception as e:
+                    print(f"Lore relationship Drive sync error: {e}")
+        drive_bg(_bg, app, project_id, user.id)
+    return jsonify(rel.to_dict()), 201
+
+
+@app.route('/api/lore-relationships/<int:rel_id>', methods=['PUT'])
+def update_lore_relationship(rel_id):
+    rel = LoreRelationship.query.get_or_404(rel_id)
+    get_project_or_404(rel.project_id)
+    data = request.get_json()
+    for f in ['relation_type', 'description', 'color']:
+        if f in data:
+            setattr(rel, f, data[f])
+    db.session.commit()
+
+    user = get_current_user()
+    if user and user.access_token:
+        def _bg(app, rid, uid):
+            with app.app_context():
+                u = User.query.get(uid)
+                r = LoreRelationship.query.get(rid)
+                if not u or not r:
+                    return
+                p = Project.query.get(r.project_id)
+                if not p:
+                    return
+                try:
+                    sync_project_lore_relationships_to_drive(u, p)
+                except Exception as e:
+                    print(f"Lore relationship Drive update error: {e}")
+        drive_bg(_bg, app, rel.id, user.id)
+    return jsonify(rel.to_dict())
+
+
+@app.route('/api/lore-relationships/<int:rel_id>', methods=['DELETE'])
+def delete_lore_relationship(rel_id):
+    rel = LoreRelationship.query.get_or_404(rel_id)
+    get_project_or_404(rel.project_id)
+    project_id = rel.project_id
+    db.session.delete(rel)
+    db.session.commit()
+
+    user = get_current_user()
+    if user and user.access_token:
+        def _bg(app, pid, uid):
+            with app.app_context():
+                u = User.query.get(uid)
+                p = Project.query.get(pid)
+                if not u or not p:
+                    return
+                try:
+                    sync_project_lore_relationships_to_drive(u, p)
+                except Exception as e:
+                    print(f"Lore relationship Drive delete sync error: {e}")
         drive_bg(_bg, app, project_id, user.id)
     return jsonify({'message': 'Deleted'})
 
@@ -1744,7 +1939,11 @@ def ensure_character_titles_column():
             },
             'lore_item': {
                 'drive_file_id': "VARCHAR(200) DEFAULT ''",
-                'drive_image_file_id': "VARCHAR(200) DEFAULT ''"
+                'drive_image_file_id': "VARCHAR(200) DEFAULT ''",
+                'event_date': "VARCHAR(120) DEFAULT ''",
+                'event_order': "INTEGER DEFAULT 0",
+                'map_x': "FLOAT DEFAULT 50",
+                'map_y': "FLOAT DEFAULT 50"
             }
         }
         for table_name, columns in required_columns.items():
@@ -1755,11 +1954,36 @@ def ensure_character_titles_column():
                     conn.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_def}")
 
 
+def ensure_lore_relationships_table():
+    engine = db.engine
+    if engine.url.get_backend_name() != 'sqlite':
+        return
+    with engine.begin() as conn:
+        table_names = {row[0] for row in conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if 'lore_relationship' not in table_names:
+            conn.exec_driver_sql("""
+                CREATE TABLE lore_relationship (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    project_id INTEGER NOT NULL,
+                    lore_a_id INTEGER NOT NULL,
+                    lore_b_id INTEGER NOT NULL,
+                    relation_type VARCHAR(100) DEFAULT '',
+                    description TEXT DEFAULT '',
+                    color VARCHAR(20) DEFAULT '#5f8fd6',
+                    FOREIGN KEY(project_id) REFERENCES project (id),
+                    FOREIGN KEY(lore_a_id) REFERENCES lore_item (id),
+                    FOREIGN KEY(lore_b_id) REFERENCES lore_item (id)
+                )
+            """)
+
+
 # --- ENTRY POINT ---
 
 if __name__ == '__main__':
     with app.app_context():
+        db.create_all()
         ensure_character_titles_column()
+        ensure_lore_relationships_table()
         print("Starting app... DB will be created fresh if not exists.")
     print("Scripvia running at http://localhost:5000")
     app.run(debug=False, use_reloader=False)

@@ -1,4 +1,4 @@
-// Scripvia — Main Frontend Logic v0.2
+// Scripvia - Main Frontend Logic v0.2
 
 // --- STATE ---
 let currentProjectId = null;
@@ -13,8 +13,14 @@ let pendingSync = false;
 let openTabs = [];
 let wikiData = {};
 let currentCharacters = [];
+let currentLoreItems = [];
 let storageScopeKey = 'guest_default';
 let relResizeHandler = null;
+let loreWebResizeHandler = null;
+let authState = {
+    loggedIn: false,
+    mode: 'guest'
+};
 
 // --- DOM REFS ---
 const projectsList = document.getElementById('projectsList');
@@ -46,12 +52,40 @@ const newCharModal = document.getElementById('newCharModal');
 const newSceneModal = document.getElementById('newSceneModal');
 const newLoreModal = document.getElementById('newLoreModal');
 const newRelModal = document.getElementById('newRelModal');
+const newLoreRelModal = document.getElementById('newLoreRelModal');
 const projectTitleInput = document.getElementById('projectTitleInput');
 const projectDescInput = document.getElementById('projectDescInput');
 const projectGenreInput = document.getElementById('projectGenreInput');
 const docTitleModalInput = document.getElementById('docTitleModalInput');
+const loreTimelineEl = document.getElementById('loreTimeline');
+const loreMapBoard = document.getElementById('loreMapBoard');
+const loreMapLines = document.getElementById('loreMapLines');
+const loreMapList = document.getElementById('loreMapList');
 
 const CREATIVE_GENRES = ['fantasy', 'sci-fi', 'fiction', 'romance', 'mystery', 'thriller', 'horror', 'historical'];
+
+function isSignedInMode() {
+    return authState.loggedIn;
+}
+
+function canAttemptDriveSync() {
+    return isSignedInMode() && navigator.onLine;
+}
+
+function shouldQueueDriveSync() {
+    return isSignedInMode() && !navigator.onLine;
+}
+
+function updateSaveButtonState() {
+    if (!saveBtn) return;
+    if (isSignedInMode()) {
+        saveBtn.textContent = navigator.onLine ? 'Save & Sync' : 'Save Offline';
+        saveBtn.title = navigator.onLine ? 'Save locally and sync to Drive' : 'Save locally now and sync to Drive when internet returns';
+    } else {
+        saveBtn.textContent = 'Save Locally';
+        saveBtn.title = 'Save on this device only';
+    }
+}
 
 // --- IMAGE UPLOAD ---
 function setupImageUpload(fileInputId, urlInputId, previewWrapId, previewImgId, clearBtnId, enableCrop = false) {
@@ -114,26 +148,84 @@ function setupImageUpload(fileInputId, urlInputId, previewWrapId, previewImgId, 
 }
 
 // --- CONFIRM DIALOG ---
-function showConfirm(message, onConfirm, title = 'Are you sure?') {
-    const existing = document.getElementById('customConfirm');
+function getDialogIcon(tone) {
+    const map = {
+        info: '\u{1F4A1}',
+        success: '\u2705',
+        warning: '\u26A0\uFE0F',
+        danger: '\u{1F6A8}'
+    };
+    return map[tone] || map.info;
+}
+
+function showDialog({
+    title = 'Notice',
+    message = '',
+    confirmText = 'OK',
+    cancelText = 'Cancel',
+    tone = 'info',
+    showCancel = false
+} = {}) {
+    const existing = document.getElementById('customDialog');
     if (existing) existing.remove();
 
-    const overlay = document.createElement('div');
-    overlay.className = 'confirm-overlay';
-    overlay.id = 'customConfirm';
-    overlay.innerHTML = `
-        <div class="confirm-box">
-            <div class="confirm-title">${title}</div>
-            <div class="confirm-msg">${message}</div>
-            <div class="confirm-actions">
-                <button class="btn-confirm-cancel" id="confirmCancelBtn">Cancel</button>
-                <button class="btn-confirm-delete" id="confirmOkBtn">Delete</button>
-            </div>
-        </div>`;
-    document.body.appendChild(overlay);
-    document.getElementById('confirmOkBtn').addEventListener('click', () => { overlay.remove(); onConfirm(); });
-    document.getElementById('confirmCancelBtn').addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-overlay';
+        overlay.id = 'customDialog';
+        overlay.innerHTML = `
+            <div class="confirm-box confirm-box-${tone}" role="dialog" aria-modal="true" aria-live="polite">
+                <div class="confirm-head">
+                    <div class="confirm-icon" aria-hidden="true">${getDialogIcon(tone)}</div>
+                    <div class="confirm-title-wrap">
+                        <div class="confirm-title">${escapeHtml(title)}</div>
+                    </div>
+                </div>
+                <div class="confirm-msg">${escapeHtml(message).replace(/\n/g, '<br>')}</div>
+                <div class="confirm-actions">
+                    ${showCancel ? `<button class="btn-confirm-cancel" id="dialogCancelBtn">${escapeHtml(cancelText)}</button>` : ''}
+                    <button class="${tone === 'danger' ? 'btn-confirm-delete' : 'btn-confirm-primary'}" id="dialogOkBtn">${escapeHtml(confirmText)}</button>
+                </div>
+            </div>`;
+
+        const onKeyDown = e => {
+            if (e.key === 'Escape') {
+                close(false);
+            }
+        };
+
+        const close = result => {
+            document.removeEventListener('keydown', onKeyDown);
+            overlay.remove();
+            resolve(result);
+        };
+
+        document.body.appendChild(overlay);
+        document.getElementById('dialogOkBtn')?.addEventListener('click', () => close(true));
+        document.getElementById('dialogCancelBtn')?.addEventListener('click', () => close(false));
+        overlay.addEventListener('click', e => { if (e.target === overlay) close(false); });
+        document.addEventListener('keydown', onKeyDown, { once: true });
+    });
+}
+
+function showNotice(message, title = 'Notice', tone = 'info') {
+    return showDialog({ title, message, confirmText: 'OK', tone, showCancel: false });
+}
+
+function showDecision(message, {
+    title = 'Are you sure?',
+    confirmText = 'Continue',
+    cancelText = 'Cancel',
+    tone = 'warning'
+} = {}) {
+    return showDialog({ title, message, confirmText, cancelText, tone, showCancel: true });
+}
+
+function showConfirm(message, onConfirm, title = 'Are you sure?') {
+    showDecision(message, { title, confirmText: 'Delete', cancelText: 'Cancel', tone: 'danger' })
+        .then(confirmed => {
+            if (confirmed) onConfirm();
+        });
 }
 
 // --- QUILL ---
@@ -150,7 +242,7 @@ function initQuill() {
                 ['blockquote', 'code-block'],
                 [{ align: [] }],
                 [{ indent: '-1' }, { indent: '+1' }],
-                ['link'], ['clean']
+                ['link', 'image'], ['clean']
             ]
         }
     });
@@ -180,8 +272,99 @@ function initQuill() {
     if (editorElement) {
         editorElement.addEventListener('mousemove', handleWikiHover);
         editorElement.addEventListener('mouseleave', hideWikiTooltip);
+        editorElement.addEventListener('paste', handleEditorPaste);
+        editorElement.addEventListener('drop', handleEditorDrop);
+        editorElement.addEventListener('dragover', e => {
+            if ([...e.dataTransfer?.files || []].some(file => file.type.startsWith('image/'))) {
+                e.preventDefault();
+            }
+        });
     }
     wikiTooltip.addEventListener('mouseleave', hideWikiTooltip);
+}
+
+function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(e.target.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
+function loadImage(src) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = src;
+    });
+}
+
+async function optimizeEditorImage(file) {
+    const originalDataUrl = await readFileAsDataUrl(file);
+    if (!file.type.startsWith('image/') || file.type === 'image/gif' || file.type === 'image/svg+xml') {
+        return originalDataUrl;
+    }
+
+    const img = await loadImage(originalDataUrl);
+    const maxDimension = 1600;
+    const scale = Math.min(1, maxDimension / Math.max(img.width, img.height));
+    const width = Math.max(1, Math.round(img.width * scale));
+    const height = Math.max(1, Math.round(img.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, width, height);
+
+    const hasAlpha = ['image/png', 'image/webp'].includes(file.type);
+    return canvas.toDataURL(hasAlpha ? 'image/png' : 'image/jpeg', hasAlpha ? undefined : 0.88);
+}
+
+function insertImageIntoEditor(src) {
+    if (!quill || !src) return;
+    const range = quill.getSelection(true) || { index: quill.getLength(), length: 0 };
+    quill.insertEmbed(range.index, 'image', src, 'user');
+    quill.setSelection(range.index + 1, 0, 'silent');
+}
+
+async function insertImagesIntoEditor(files) {
+    const imageFiles = [...files].filter(file => file.type.startsWith('image/'));
+    if (!imageFiles.length) return false;
+
+    for (const file of imageFiles) {
+        try {
+            const src = await optimizeEditorImage(file);
+            insertImageIntoEditor(src);
+        } catch (e) {
+            console.error('insertImagesIntoEditor:', e);
+            await showNotice('That image could not be inserted into the editor.', 'Image Paste Failed', 'warning');
+        }
+    }
+    return true;
+}
+
+async function handleEditorPaste(e) {
+    const files = [...(e.clipboardData?.files || [])];
+    if (!files.some(file => file.type.startsWith('image/'))) return;
+    e.preventDefault();
+    await insertImagesIntoEditor(files);
+}
+
+async function handleEditorDrop(e) {
+    const files = [...(e.dataTransfer?.files || [])];
+    if (!files.some(file => file.type.startsWith('image/'))) return;
+    e.preventDefault();
+    const selection = document.caretRangeFromPoint ? document.caretRangeFromPoint(e.clientX, e.clientY) : null;
+    if (selection && quill) {
+        const blot = Quill.find(selection.startContainer, true);
+        if (blot) {
+            const index = quill.getIndex(blot);
+            quill.setSelection(index, 0, 'silent');
+        }
+    }
+    await insertImagesIntoEditor(files);
 }
 // --- API ---
 async function api(method, url, body = null) {
@@ -207,13 +390,27 @@ function renderProjects(projects) {
         <li class="project-item ${p.id === currentProjectId ? 'active' : ''}" onclick="selectProject(${p.id})">
             <span class="item-name" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</span>
             <span class="item-meta">${genreEmoji(p.genre)}</span>
-            <button class="item-delete" onclick="deleteProject(event,${p.id})">×</button>
+            <button class="item-delete" onclick="deleteProject(event,${p.id})">&times;</button>
         </li>`).join('');
 }
 
 function genreEmoji(genre) {
-    const map = { fantasy: '⚔️', 'sci-fi': '🚀', fiction: '📖', romance: '💕', mystery: '🔍', thriller: '⚡', horror: '🕯️', historical: '🏛️', journal: '📓', screenplay: '🎬', poetry: '✨', general: '📝', other: '📌' };
-    return map[genre] || '📝';
+    const map = {
+        fantasy: '\u2694\uFE0F',
+        'sci-fi': '\u{1F680}',
+        fiction: '\u{1F4D6}',
+        romance: '\u{1F495}',
+        mystery: '\u{1F50D}',
+        thriller: '\u26A1',
+        horror: '\u{1F56F}\uFE0F',
+        historical: '\u{1F3DB}\uFE0F',
+        journal: '\u{1F4D3}',
+        screenplay: '\u{1F3AC}',
+        poetry: '\u2728',
+        general: '\u{1F4DD}',
+        other: '\u{1F4CC}'
+    };
+    return map[genre] || '\u{1F4DD}';
 }
 
 async function createProject() {
@@ -268,9 +465,23 @@ function showProjectDetail() { projectsSection.style.display = 'none'; projectDe
 async function showProjectOverview(projectId) {
     try {
         const stats = await api('GET', `/api/projects/${projectId}/stats`);
-        const genreEmojis = { fantasy: '⚔️ Fantasy', 'sci-fi': '🚀 Sci-Fi', fiction: '📖 Fiction', romance: '💕 Romance', mystery: '🔍 Mystery', thriller: '⚡ Thriller', horror: '🕯️ Horror', historical: '🏛️ Historical', journal: '📓 Journal', screenplay: '🎬 Screenplay', poetry: '✨ Poetry', general: '📝 General', other: '📌 Other' };
+        const genreEmojis = {
+            fantasy: '\u2694\uFE0F Fantasy',
+            'sci-fi': '\u{1F680} Sci-Fi',
+            fiction: '\u{1F4D6} Fiction',
+            romance: '\u{1F495} Romance',
+            mystery: '\u{1F50D} Mystery',
+            thriller: '\u26A1 Thriller',
+            horror: '\u{1F56F}\uFE0F Horror',
+            historical: '\u{1F3DB}\uFE0F Historical',
+            journal: '\u{1F4D3} Journal',
+            screenplay: '\u{1F3AC} Screenplay',
+            poetry: '\u2728 Poetry',
+            general: '\u{1F4DD} General',
+            other: '\u{1F4CC} Other'
+        };
 
-        document.getElementById('overviewGenre').textContent = genreEmojis[stats.genre] || '📝 General';
+        document.getElementById('overviewGenre').textContent = genreEmojis[stats.genre] || '\u{1F4DD} General';
         document.getElementById('overviewTitle').textContent = stats.title;
         document.getElementById('overviewDesc').textContent = stats.description || 'No description yet.';
         document.getElementById('ovWords').textContent = stats.total_words.toLocaleString();
@@ -278,8 +489,8 @@ async function showProjectOverview(projectId) {
         document.getElementById('ovCharacters').textContent = stats.character_count;
         document.getElementById('ovScenes').textContent = stats.scene_count;
         document.getElementById('ovLore').textContent = stats.lore_count;
-        document.getElementById('ovLastEdited').textContent = stats.last_edited ? `✎ Last edited ${formatDateNice(stats.last_edited)}` : '';
-        document.getElementById('ovCreated').textContent = stats.created_at ? `✦ Created ${formatDateNice(stats.created_at)}` : '';
+        document.getElementById('ovLastEdited').textContent = stats.last_edited ? `\u270E Last edited ${formatDateNice(stats.last_edited)}` : '';
+        document.getElementById('ovCreated').textContent = stats.created_at ? `\u2726 Created ${formatDateNice(stats.created_at)}` : '';
 
         const isCreative = stats.is_creative;
         ['ovCharBtn', 'ovSceneBtn', 'ovLoreBtn', 'ovRelBtn'].forEach(id =>
@@ -365,9 +576,9 @@ function renderDocuments(docs) {
             onclick="openDocument(${d.id})"
             ondragstart="onDragStart(event)" ondragover="onDragOver(event)"
             ondragend="onDragEnd(event)" ondrop="onDrop(event)">
-            <span class="drag-handle" title="Drag to reorder">⠿</span>
+            <span class="drag-handle" title="Drag to reorder">\u283F</span>
             <span class="item-name" title="${escapeHtml(d.title)}">${escapeHtml(d.title)}</span>
-            <button class="item-delete" onclick="deleteDocument(event,${d.id})">×</button>
+            <button class="item-delete" onclick="deleteDocument(event,${d.id})">&times;</button>
         </li>`).join('');
 }
 
@@ -441,7 +652,7 @@ async function openDocument(id, type = 'chapter') {
         quill.root.innerHTML = doc.content || '';
         quill.history.clear();
         showEditor(); enableHeaderBtns(true);
-        if (!checkLocalStorageRestore(`${type}_${id}`, doc.content || '')) setSaveStatus('saved');
+        if (!await checkLocalStorageRestore(`${type}_${id}`, doc.content || '')) setSaveStatus('saved');
         updateStats(); startAutoSave(); addOpenTab(id, doc.title, type);
         if (type === 'chapter' && currentProjectId) await loadDocuments(currentProjectId);
         if (type === 'scene' && currentProjectId) await loadScenes(currentProjectId);
@@ -461,7 +672,7 @@ async function saveDocument() {
         updateLastSaved();
         if (currentDocType === 'chapter') await loadDocuments(currentProjectId);
         if (currentDocType === 'scene') await loadScenes(currentProjectId);
-        if (navigator.onLine && currentDocType === 'chapter') {
+        if (canAttemptDriveSync() && currentDocType === 'chapter') {
             setSaveStatus('syncing');
             try {
                 await api('POST', `/api/documents/${currentDocId}/sync`);
@@ -471,11 +682,11 @@ async function saveDocument() {
             catch (e) {
                 setSaveStatus('error');
                 console.error('driveSync:', e);
-                alert('Drive sync failed. Please try again after restarting the app.');
+                await showNotice('Drive sync failed. Please try again after restarting the app.', 'Sync Failed', 'danger');
             }
         } else {
             setSaveStatus('saved');
-            if (!navigator.onLine) pendingSync = true;
+            if (shouldQueueDriveSync() && currentDocType === 'chapter') pendingSync = true;
         }
     } catch (e) { setSaveStatus('error'); console.error('saveDocument:', e); }
 }
@@ -504,7 +715,7 @@ function renderCharacters(chars) {
         <li class="item-list-entry character-list-entry" data-char-id="${c.id}" onclick="openEditCharModal(${c.id})">
             <span class="item-name" title="${escapeHtml(c.name)}">${escapeHtml(c.name)}</span>
             ${c.role ? `<span class="item-badge">${escapeHtml(c.role)}</span>` : ''}
-            <button class="item-delete" onclick="deleteCharacter(event,${c.id})">×</button>
+            <button class="item-delete" onclick="deleteCharacter(event,${c.id})">&times;</button>
         </li>`).join('');
     attachCharacterListHoverTooltips();
 }
@@ -547,7 +758,7 @@ function addCharacterTitleInput(value = '') {
     row.className = 'char-title-row';
     row.innerHTML = `
         <input type="text" class="modal-input char-title-input" placeholder="e.g. Crown Prince, Captain..." value="${escapeHtml(value)}">
-        <button type="button" class="btn-ghost-sm char-title-remove" aria-label="Remove title">×</button>
+        <button type="button" class="btn-ghost-sm char-title-remove" aria-label="Remove title">&times;</button>
     `;
     row.querySelector('.char-title-remove').addEventListener('click', () => {
         row.remove();
@@ -755,7 +966,7 @@ function confirmCrop() {
     }
 
     if (!cropRect || cropRect.w < 5 || cropRect.h < 5) {
-        // No crop selected — use full image
+        // No crop selected - use full image
         if (cropCallback) cropCallback(cropImage.src);
         closeModal(cropModal);
         return;
@@ -803,13 +1014,22 @@ async function loadScenes(projectId) {
 }
 
 function renderScenes(scenes) {
-    const moodEmoji = { tense: '⚡', romantic: '💕', mysterious: '🌫️', action: '🔥', sad: '💧', hopeful: '🌅', dark: '🌑', comedic: '😄' };
+    const moodEmoji = {
+        tense: '\u26A1',
+        romantic: '\u{1F495}',
+        mysterious: '\u{1F32B}\uFE0F',
+        action: '\u{1F525}',
+        sad: '\u{1F4A7}',
+        hopeful: '\u{1F305}',
+        dark: '\u{1F311}',
+        comedic: '\u{1F604}'
+    };
     if (!scenes.length) { scenesList.innerHTML = '<li class="empty-state">No scenes yet.</li>'; return; }
     scenesList.innerHTML = scenes.map(s => `
         <li class="item-list-entry ${s.id === currentDocId && currentDocType === 'scene' ? 'active' : ''}" onclick="openDocument(${s.id},'scene')">
             <span class="item-name" title="${escapeHtml(s.title)}">${escapeHtml(s.title)}</span>
             ${s.mood ? `<span class="item-badge">${moodEmoji[s.mood] || ''} ${s.mood}</span>` : ''}
-            <button class="item-delete" onclick="deleteScene(event,${s.id})">×</button>
+            <button class="item-delete" onclick="deleteScene(event,${s.id})">&times;</button>
         </li>`).join('');
 }
 
@@ -837,33 +1057,52 @@ async function deleteScene(event, id) {
 
 // --- LORE ---
 async function loadLore(projectId) {
-    try { renderLore(await api('GET', `/api/projects/${projectId}/lore`)); }
+    try {
+        const [items, rels] = await Promise.all([
+            api('GET', `/api/projects/${projectId}/lore`),
+            loadLoreRelationships(projectId)
+        ]);
+        currentLoreItems = items;
+        loreEdges = rels;
+        renderLore(currentLoreItems);
+    }
     catch (e) { console.error('loadLore:', e); }
 }
 
-function renderLore(items) {
-    const catEmoji = { item: '⚔️', place: '🗺️', organization: '🏛️', concept: '✨', creature: '🐉', event: '📅', other: '📌' };
-    if (!items.length) { loreList.innerHTML = '<li class="empty-state">No lore entries yet.</li>'; return; }
-    loreList.innerHTML = items.map(i => `
-        <li class="item-list-entry" onclick="openEditLoreModal(${i.id})">
-            <span class="item-name" title="${escapeHtml(i.name)}">${escapeHtml(i.name)}</span>
-            <span class="item-badge">${catEmoji[i.category] || '📌'}</span>
-            <button class="item-delete" onclick="deleteLore(event,${i.id})">×</button>
-        </li>`).join('');
+function updateLoreMapInputLabels() {
+    const xValue = document.getElementById('loreMapXInput')?.value ?? 50;
+    const yValue = document.getElementById('loreMapYInput')?.value ?? 50;
+    document.getElementById('loreMapXValue').textContent = `${Math.round(xValue)}%`;
+    document.getElementById('loreMapYValue').textContent = `${Math.round(yValue)}%`;
+}
+
+function getLorePayloadFromModal() {
+    const categorySelect = document.getElementById('loreCategoryInput');
+    const customCategoryInput = document.getElementById('loreCustomCategoryInput');
+    const category = categorySelect?.value === 'custom'
+        ? (customCategoryInput?.value.trim() || '')
+        : categorySelect?.value;
+    return {
+        name: document.getElementById('loreNameInput').value.trim(),
+        category,
+        description: document.getElementById('loreDescInput').value.trim(),
+        image_url: document.getElementById('loreImageInput').value.trim(),
+        event_date: document.getElementById('loreEventDateInput').value.trim(),
+        event_order: parseInt(document.getElementById('loreEventOrderInput').value || '0', 10) || 0,
+        map_x: parseFloat(document.getElementById('loreMapXInput').value || '50'),
+        map_y: parseFloat(document.getElementById('loreMapYInput').value || '50')
+    };
 }
 
 async function createLore() {
-    const name = document.getElementById('loreNameInput').value.trim();
+    const payload = getLorePayloadFromModal();
+    const name = payload.name;
     if (!name || !currentProjectId) { document.getElementById('loreNameInput').focus(); return; }
+    if (!payload.category) { document.getElementById('loreCustomCategoryInput')?.focus(); return; }
     try {
-        await api('POST', `/api/projects/${currentProjectId}/lore`, {
-            name, category: document.getElementById('loreCategoryInput').value,
-            description: document.getElementById('loreDescInput').value.trim(),
-            image_url: document.getElementById('loreImageInput').value.trim()
-        });
+        await api('POST', `/api/projects/${currentProjectId}/lore`, payload);
         closeModal(newLoreModal);
-        ['loreNameInput', 'loreDescInput', 'loreImageInput'].forEach(id => document.getElementById(id).value = '');
-        document.getElementById('loreCategoryInput').value = 'item';
+        resetLoreModal();
         await loadLore(currentProjectId); await loadWikiData(currentProjectId);
     } catch (e) { console.error('createLore:', e); }
 }
@@ -879,10 +1118,18 @@ async function deleteLore(event, id) {
 async function openEditLoreModal(id) {
     try {
         const item = await api('GET', `/api/lore/${id}`);
+        const presetLoreCategories = ['item', 'place', 'organization', 'concept', 'creature', 'event', 'other'];
         document.getElementById('loreNameInput').value = item.name || '';
-        document.getElementById('loreCategoryInput').value = item.category || 'item';
+        document.getElementById('loreCategoryInput').value = presetLoreCategories.includes(item.category) ? item.category : 'custom';
+        document.getElementById('loreCustomCategoryInput').value = presetLoreCategories.includes(item.category) ? '' : (item.category || '');
+        updateLoreCategoryCustomInput();
         document.getElementById('loreDescInput').value = item.description || '';
         document.getElementById('loreImageInput').value = item.image_url || '';
+        document.getElementById('loreEventDateInput').value = item.event_date || '';
+        document.getElementById('loreEventOrderInput').value = item.event_order ?? 0;
+        document.getElementById('loreMapXInput').value = item.map_x ?? 50;
+        document.getElementById('loreMapYInput').value = item.map_y ?? 50;
+        updateLoreMapInputLabels();
         const preview = document.getElementById('loreImgPreview');
         if (item.image_url) { document.getElementById('loreImgPreviewEl').src = item.image_url; preview.style.display = 'block'; }
         else { preview.style.display = 'none'; }
@@ -894,16 +1141,14 @@ async function openEditLoreModal(id) {
 }
 
 async function saveEditLore(id) {
-    const name = document.getElementById('loreNameInput').value.trim();
+    const payload = getLorePayloadFromModal();
+    const name = payload.name;
     if (!name) { document.getElementById('loreNameInput').focus(); return; }
+    if (!payload.category) { document.getElementById('loreCustomCategoryInput')?.focus(); return; }
     const btn = document.getElementById('confirmLoreBtn');
     btn.textContent = 'Saving...'; btn.disabled = true;
     try {
-        await api('PUT', `/api/lore/${id}`, {
-            name, category: document.getElementById('loreCategoryInput').value,
-            description: document.getElementById('loreDescInput').value.trim(),
-            image_url: document.getElementById('loreImageInput').value.trim()
-        });
+        await api('PUT', `/api/lore/${id}`, payload);
         closeModal(newLoreModal);
         await loadLore(currentProjectId); await loadWikiData(currentProjectId);
     } catch (e) { console.error('saveEditLore:', e); }
@@ -914,11 +1159,896 @@ function resetLoreModal() {
     document.querySelector('#newLoreModal .modal-title').textContent = 'New Lore Entry';
     const btn = document.getElementById('confirmLoreBtn');
     btn.textContent = 'Create Entry'; delete btn.dataset.editId; delete btn.dataset.mode;
-    ['loreNameInput', 'loreDescInput', 'loreImageInput'].forEach(id => document.getElementById(id).value = '');
+    ['loreNameInput', 'loreDescInput', 'loreImageInput', 'loreEventDateInput', 'loreEventOrderInput', 'loreCustomCategoryInput'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('loreCategoryInput').value = 'item';
+    updateLoreCategoryCustomInput();
+    document.getElementById('loreMapXInput').value = 50;
+    document.getElementById('loreMapYInput').value = 50;
+    updateLoreMapInputLabels();
     document.getElementById('loreImgPreview').style.display = 'none';
     document.getElementById('loreImgPreviewEl').src = '';
     document.getElementById('loreImageFile').value = '';
+}
+
+// --- LORE CONNECTIONS + VIEWS ---
+let loreRelSelectedColor = '#5f8fd6';
+let editingLoreRelId = null;
+let editLoreRelColor = '#5f8fd6';
+let loreNodes = [], loreEdges = [];
+let loreCanvas = null, loreCtx = null;
+let loreDragging = null, loreDragOffX = 0, loreDragOffY = 0;
+let loreZoom = 1, lorePanX = 0, lorePanY = 0;
+let loreIsPanning = false, lorePanStart = { x: 0, y: 0 };
+let loreHoveredNodeId = null;
+let loreHoveredEdgeId = null;
+let loreMapDragState = null;
+let loreMapRelations = [];
+let loreTimelineItems = [];
+let loreTimelineEdges = [];
+
+function populateLoreRelationTypeSelects() {
+    const html = LORE_RELATION_TYPE_OPTIONS.map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
+    ['loreRelTypeInput', 'editLoreRelTypeInput'].forEach(id => {
+        const select = document.getElementById(id);
+        if (select) select.innerHTML = html;
+    });
+    if (!document.getElementById('loreRelCustomTypeInput')) {
+        document.getElementById('loreRelTypeInput')?.insertAdjacentHTML('afterend', '<input type="text" class="modal-input" id="loreRelCustomTypeInput" placeholder="Write your custom connection..." style="display:none;">');
+    }
+    if (!document.getElementById('editLoreRelCustomTypeInput')) {
+        document.getElementById('editLoreRelTypeInput')?.insertAdjacentHTML('afterend', '<input type="text" class="modal-input" id="editLoreRelCustomTypeInput" placeholder="Write your custom connection..." style="display:none;">');
+    }
+    updateLoreRelationCustomInput('new');
+    updateLoreRelationCustomInput('edit');
+}
+
+function updateLoreRelationCustomInput(mode) {
+    const isEdit = mode === 'edit';
+    const select = document.getElementById(isEdit ? 'editLoreRelTypeInput' : 'loreRelTypeInput');
+    const input = document.getElementById(isEdit ? 'editLoreRelCustomTypeInput' : 'loreRelCustomTypeInput');
+    if (!select || !input) return;
+    const isCustom = select.value === 'custom';
+    input.style.display = isCustom ? 'block' : 'none';
+    input.required = isCustom;
+}
+
+function getSelectedLoreRelationType(mode) {
+    const isEdit = mode === 'edit';
+    const select = document.getElementById(isEdit ? 'editLoreRelTypeInput' : 'loreRelTypeInput');
+    const input = document.getElementById(isEdit ? 'editLoreRelCustomTypeInput' : 'loreRelCustomTypeInput');
+    if (!select) return '';
+    if (select.value !== 'custom') return select.value;
+    return input?.value.trim() || '';
+}
+
+async function loadLoreRelationships(projectId) {
+    return api('GET', `/api/projects/${projectId}/lore-relationships`);
+}
+
+async function openNewLoreRelModal(options = {}) {
+    try {
+        const items = currentLoreItems.length ? currentLoreItems : await api('GET', `/api/projects/${currentProjectId}/lore`);
+        if (items.length < 2) {
+            await showNotice('You need at least 2 lore entries first.', 'Not Enough Lore', 'warning');
+            return;
+        }
+        const optionsHtml = items.map(item => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join('');
+        document.getElementById('loreRelAInput').innerHTML = optionsHtml;
+        document.getElementById('loreRelBInput').innerHTML = optionsHtml;
+        if (typeof options.preselectLoreA === 'number') {
+            document.getElementById('loreRelAInput').value = String(options.preselectLoreA);
+            const other = items.find(item => item.id !== options.preselectLoreA);
+            if (other) document.getElementById('loreRelBInput').value = String(other.id);
+        } else if (items.length > 1) {
+            document.getElementById('loreRelBInput').value = String(items[1].id);
+        }
+        document.getElementById('loreRelTypeInput').value = 'related to';
+        const customInput = document.getElementById('loreRelCustomTypeInput');
+        if (customInput) customInput.value = '';
+        updateLoreRelationCustomInput('new');
+        document.getElementById('loreRelDescInput').value = '';
+        loreRelSelectedColor = '#5f8fd6';
+        document.querySelectorAll('#loreRelColorPicker .rel-color-opt').forEach(opt => opt.classList.toggle('selected', opt.dataset.color === loreRelSelectedColor));
+        openModal(newLoreRelModal);
+    } catch (e) { console.error('openNewLoreRelModal:', e); }
+}
+
+async function createLoreRelationship() {
+    const loreA = parseInt(document.getElementById('loreRelAInput').value, 10);
+    const loreB = parseInt(document.getElementById('loreRelBInput').value, 10);
+    if (loreA === loreB) {
+        await showNotice('Select two different lore entries.', 'Choose Different Entries', 'warning');
+        return;
+    }
+    const relationType = getSelectedLoreRelationType('new');
+    if (!relationType) {
+        document.getElementById('loreRelCustomTypeInput')?.focus();
+        return;
+    }
+    const btn = document.getElementById('confirmLoreRelBtn');
+    btn.textContent = 'Adding...';
+    btn.disabled = true;
+    try {
+        await api('POST', `/api/projects/${currentProjectId}/lore-relationships`, {
+            lore_a_id: loreA,
+            lore_b_id: loreB,
+            relation_type: relationType,
+            description: document.getElementById('loreRelDescInput').value.trim(),
+            color: loreRelSelectedColor
+        });
+        closeModal(newLoreRelModal);
+        if (document.getElementById('loreWebOverlay').style.display !== 'none') await openLoreWeb();
+        if (document.getElementById('loreTimelineOverlay').style.display !== 'none') await openLoreTimeline();
+        if (document.getElementById('loreMapOverlay').style.display !== 'none') await openLoreMap();
+    } catch (e) { console.error('createLoreRelationship:', e); }
+    finally {
+        btn.textContent = 'Add Connection';
+        btn.disabled = false;
+    }
+}
+
+function openEditLoreRelModal(edge) {
+    editingLoreRelId = edge.id;
+    editLoreRelColor = edge.color || '#5f8fd6';
+    document.getElementById('editLoreRelNames').textContent = `${edge.lore_a_name} <-> ${edge.lore_b_name}`;
+    const select = document.getElementById('editLoreRelTypeInput');
+    const customInput = document.getElementById('editLoreRelCustomTypeInput');
+    const isPreset = LORE_RELATION_TYPE_OPTIONS.some(([value]) => value === edge.relation_type && value !== 'custom');
+    select.value = isPreset ? edge.relation_type : 'custom';
+    if (customInput) customInput.value = isPreset ? '' : (edge.relation_type || '');
+    updateLoreRelationCustomInput('edit');
+    document.getElementById('editLoreRelDescInput').value = edge.description || '';
+    document.querySelectorAll('#editLoreRelColorPicker .rel-color-opt').forEach(opt => opt.classList.toggle('selected', opt.dataset.color === editLoreRelColor));
+    openModal(document.getElementById('editLoreRelModal'));
+}
+
+async function saveEditLoreRel() {
+    if (!editingLoreRelId) return;
+    const relationType = getSelectedLoreRelationType('edit');
+    if (!relationType) {
+        document.getElementById('editLoreRelCustomTypeInput')?.focus();
+        return;
+    }
+    const btn = document.getElementById('confirmEditLoreRelBtn');
+    btn.textContent = 'Saving...';
+    btn.disabled = true;
+    try {
+        await api('PUT', `/api/lore-relationships/${editingLoreRelId}`, {
+            relation_type: relationType,
+            description: document.getElementById('editLoreRelDescInput').value.trim(),
+            color: editLoreRelColor
+        });
+        closeModal(document.getElementById('editLoreRelModal'));
+        await openLoreWeb();
+    } catch (e) { console.error('saveEditLoreRel:', e); }
+    finally {
+        btn.textContent = 'Save Changes';
+        btn.disabled = false;
+    }
+}
+
+async function deleteLoreRelFromEdit() {
+    const id = editingLoreRelId;
+    closeModal(document.getElementById('editLoreRelModal'));
+    if (!id) return;
+    try {
+        await api('DELETE', `/api/lore-relationships/${id}`);
+        if (document.getElementById('loreWebOverlay').style.display !== 'none') await openLoreWeb();
+        if (document.getElementById('loreTimelineOverlay').style.display !== 'none') await openLoreTimeline();
+        if (document.getElementById('loreMapOverlay').style.display !== 'none') await openLoreMap();
+    } catch (e) { console.error('deleteLoreRelFromEdit:', e); }
+}
+
+function resizeLoreCanvas() {
+    if (!loreCanvas || !loreCtx || document.getElementById('loreWebOverlay').style.display === 'none') return;
+    const dpr = window.devicePixelRatio || 1;
+    loreCanvas.width = loreCanvas.offsetWidth * dpr;
+    loreCanvas.height = loreCanvas.offsetHeight * dpr;
+    loreCanvas._cssW = loreCanvas.offsetWidth;
+    loreCanvas._cssH = loreCanvas.offsetHeight;
+    loreCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawLoreWeb();
+}
+
+function drawLoreWeb() {
+    if (!loreCtx || !loreCanvas) return;
+    const ctx = loreCtx;
+    const width = loreCanvas._cssW || loreCanvas.offsetWidth;
+    const height = loreCanvas._cssH || loreCanvas.offsetHeight;
+    const style = getComputedStyle(document.documentElement);
+    const textPrimary = style.getPropertyValue('--text-primary').trim() || '#f0eeff';
+    const bgModal = style.getPropertyValue('--bg-modal').trim() || '#181a2e';
+    const bgHover = style.getPropertyValue('--bg-hover').trim() || 'rgba(160,160,170,0.25)';
+    const connectedNodeIds = new Set();
+    const nodeById = new Map(loreNodes.map(node => [node.id, node]));
+    if (loreHoveredNodeId) {
+        connectedNodeIds.add(loreHoveredNodeId);
+        loreEdges.forEach(edge => {
+            if (edge.lore_a_id === loreHoveredNodeId || edge.lore_b_id === loreHoveredNodeId) {
+                connectedNodeIds.add(edge.lore_a_id);
+                connectedNodeIds.add(edge.lore_b_id);
+            }
+        });
+    }
+
+    ctx.clearRect(0, 0, width, height);
+    ctx.save();
+    ctx.translate(lorePanX, lorePanY);
+    ctx.scale(loreZoom, loreZoom);
+
+    const pairCount = {};
+    const pairIndex = {};
+    loreEdges.forEach(edge => {
+        const key = [Math.min(edge.lore_a_id, edge.lore_b_id), Math.max(edge.lore_a_id, edge.lore_b_id)].join('-');
+        pairCount[key] = (pairCount[key] || 0) + 1;
+    });
+
+    loreEdges.forEach(edge => {
+        const a = nodeById.get(edge.lore_a_id);
+        const b = nodeById.get(edge.lore_b_id);
+        if (!a || !b) return;
+        const isRelatedToHover = loreHoveredNodeId && (edge.lore_a_id === loreHoveredNodeId || edge.lore_b_id === loreHoveredNodeId);
+        const key = [Math.min(edge.lore_a_id, edge.lore_b_id), Math.max(edge.lore_a_id, edge.lore_b_id)].join('-');
+        const total = pairCount[key] || 1;
+        pairIndex[key] = pairIndex[key] || 0;
+        const idx = pairIndex[key]++;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const offset = total === 1 ? 0 : (idx - (total - 1) / 2) * 55;
+        const cpX = (a.x + b.x) / 2 + (-dy / len) * offset;
+        const cpY = (a.y + b.y) / 2 + (dx / len) * offset;
+        const midX = 0.25 * a.x + 0.5 * cpX + 0.25 * b.x;
+        const midY = 0.25 * a.y + 0.5 * cpY + 0.25 * b.y;
+        edge._ax = a.x;
+        edge._ay = a.y;
+        edge._bx = b.x;
+        edge._by = b.y;
+        edge._cpX = cpX;
+        edge._cpY = cpY;
+        edge._mx = midX;
+        edge._my = midY;
+
+        ctx.beginPath(); 
+        ctx.moveTo(a.x, a.y);
+        ctx.quadraticCurveTo(cpX, cpY, b.x, b.y);
+        ctx.strokeStyle = edge.color || '#5f8fd6';
+        ctx.lineWidth = isRelatedToHover ? 4.5 : 2.5;
+        ctx.globalAlpha = loreHoveredNodeId ? (isRelatedToHover ? 1 : 0.06) : 0.8;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+
+        const label = formatLoreRelationLabel(edge.relation_type);
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const labelWidth = Math.max(42, ctx.measureText(label).width + 16);
+        ctx.fillStyle = loreHoveredNodeId ? (isRelatedToHover ? bgHover : 'rgba(118,118,126,0.24)') : bgModal;
+        ctx.beginPath();
+        ctx.roundRect(midX - labelWidth / 2, midY - 11, labelWidth, 22, 6);
+        ctx.fill();
+        ctx.globalAlpha = loreHoveredNodeId ? (isRelatedToHover ? 1 : 0.12) : 1;
+        ctx.strokeStyle = edge.color || '#5f8fd6';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.globalAlpha = loreHoveredNodeId ? (isRelatedToHover ? 1 : 0.4) : 1;
+        ctx.fillStyle = loreHoveredNodeId ? (isRelatedToHover ? textPrimary : 'rgba(225,225,232,0.42)') : textPrimary;
+        ctx.fillText(label, midX, midY);
+        ctx.globalAlpha = 1;
+    });
+
+    const baseRadius = 38;
+    loreNodes.forEach(node => {
+        const isHoverFocus = loreHoveredNodeId === node.id;
+        const isHoverRelated = connectedNodeIds.has(node.id);
+        const drawY = node.y - (isHoverRelated ? 6 : 0);
+        const drawR = baseRadius + (isHoverFocus ? 3 : 0);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(node.x, drawY, drawR, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.globalAlpha = loreHoveredNodeId ? (isHoverRelated ? 1 : 0.16) : 1;
+        if (node.img && node.img.complete && node.img.naturalWidth > 0) {
+            const iw = node.img.naturalWidth;
+            const ih = node.img.naturalHeight;
+            const srcSize = Math.min(iw, ih);
+            const srcX = (iw - srcSize) / 2;
+            const srcY = (ih - srcSize) / 2;
+            ctx.drawImage(node.img, srcX, srcY, srcSize, srcSize, node.x - drawR, drawY - drawR, drawR * 2, drawR * 2);
+        } else {
+            const gradient = ctx.createRadialGradient(node.x, drawY - drawR * 0.3, 0, node.x, drawY, drawR);
+            gradient.addColorStop(0, node.color);
+            gradient.addColorStop(1, '#18243c');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(node.x - drawR, drawY - drawR, drawR * 2, drawR * 2);
+            ctx.fillStyle = 'rgba(255,255,255,0.95)';
+            ctx.font = 'bold 18px serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(node.shortLabel, node.x, drawY);
+        }
+        ctx.restore();
+        ctx.globalAlpha = 1;
+
+        ctx.beginPath();
+        ctx.arc(node.x, drawY, drawR, 0, Math.PI * 2);
+        ctx.strokeStyle = loreHoveredNodeId ? (isHoverRelated ? '#d7d2e2' : 'rgba(123,111,176,0.22)') : node.color;
+        ctx.lineWidth = isHoverFocus ? 4.5 : 2.5;
+        ctx.stroke();
+
+        ctx.font = `600 13px 'DM Sans', sans-serif`;
+        const pillWidth = Math.max(84, ctx.measureText(node.name).width + 16);
+        const nameX = node.x - pillWidth / 2;
+        const nameY = drawY + drawR + 6;
+        ctx.fillStyle = loreHoveredNodeId ? (isHoverRelated ? bgHover : 'rgba(118,118,126,0.26)') : bgModal;
+        ctx.beginPath();
+        ctx.roundRect(nameX, nameY, pillWidth, 22, 6);
+        ctx.fill();
+        ctx.fillStyle = loreHoveredNodeId ? (isHoverRelated ? textPrimary : 'rgba(225,225,232,0.42)') : textPrimary;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(node.name, node.x, nameY + 11);
+
+        const metaLabel = getLoreCategoryLabel(node.category);
+        ctx.font = `600 10px 'DM Sans', sans-serif`;
+        const metaWidth = Math.max(58, ctx.measureText(metaLabel).width + 14);
+        const metaX = node.x - metaWidth / 2;
+        const metaY = nameY + 25;
+        ctx.fillStyle = loreHoveredNodeId ? (isHoverRelated ? bgHover : 'rgba(118,118,126,0.22)') : 'rgba(255,255,255,0.05)';
+        ctx.beginPath();
+        ctx.roundRect(metaX, metaY, metaWidth, 18, 5);
+        ctx.fill();
+        ctx.fillStyle = loreHoveredNodeId ? (isHoverRelated ? node.color : 'rgba(190,190,205,0.38)') : node.color;
+        ctx.fillText(metaLabel, node.x, metaY + 9);
+
+        node._hoverBounds = {
+            cx: node.x,
+            cy: drawY,
+            r: drawR,
+            nameX,
+            nameY,
+            nameW: pillWidth,
+            nameH: 22,
+            roleBounds: { x: metaX, y: metaY, w: metaWidth, h: 18 }
+        };
+    });
+
+    ctx.restore();
+}
+
+function isNearLoreEdge(mx, my, edge) {
+    return isNearCurve(mx, my, edge);
+}
+
+function getLoreNodeAtPoint(cx, cy) {
+    return loreNodes.find(node => {
+        const bounds = node._hoverBounds;
+        if (!bounds) return false;
+        const onCircle = Math.hypot(bounds.cx - cx, bounds.cy - cy) <= bounds.r;
+        const onName = cx >= bounds.nameX && cx <= bounds.nameX + bounds.nameW && cy >= bounds.nameY && cy <= bounds.nameY + bounds.nameH;
+        const onMeta = bounds.roleBounds && cx >= bounds.roleBounds.x && cx <= bounds.roleBounds.x + bounds.roleBounds.w &&
+            cy >= bounds.roleBounds.y && cy <= bounds.roleBounds.y + bounds.roleBounds.h;
+        return onCircle || onName || onMeta;
+    }) || null;
+}
+
+function setupLoreCanvasEvents() {
+    let mouseDownPos = null;
+    let mouseDownTime = 0;
+
+    loreCanvas.onwheel = (e) => {
+        e.preventDefault();
+        const rect = loreCanvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        const newZoom = Math.min(Math.max(loreZoom * (e.deltaY > 0 ? 0.9 : 1.1), 0.25), 4);
+        lorePanX = mx - (mx - lorePanX) * (newZoom / loreZoom);
+        lorePanY = my - (my - lorePanY) * (newZoom / loreZoom);
+        loreZoom = newZoom;
+        drawLoreWeb();
+    };
+
+    loreCanvas.onmousedown = (e) => {
+        const rect = loreCanvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        mouseDownPos = { x: mx, y: my };
+        mouseDownTime = Date.now();
+        const cx = (mx - lorePanX) / loreZoom;
+        const cy = (my - lorePanY) / loreZoom;
+        loreDragging = getLoreNodeAtPoint(cx, cy);
+        hideWikiTooltip();
+        if (loreDragging) {
+            loreDragOffX = loreDragging.x - cx;
+            loreDragOffY = loreDragging.y - cy;
+        } else {
+            loreIsPanning = true;
+            lorePanStart = { x: mx - lorePanX, y: my - lorePanY };
+            loreCanvas.style.cursor = 'grabbing';
+        }
+    };
+
+    loreCanvas.onmousemove = (e) => {
+        const rect = loreCanvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        if (loreDragging) {
+            loreDragging.x = (mx - lorePanX) / loreZoom + loreDragOffX;
+            loreDragging.y = (my - lorePanY) / loreZoom + loreDragOffY;
+            drawLoreWeb();
+            return;
+        }
+        if (loreIsPanning) {
+            lorePanX = mx - lorePanStart.x;
+            lorePanY = my - lorePanStart.y;
+            drawLoreWeb();
+            return;
+        }
+
+        const cx = (mx - lorePanX) / loreZoom;
+        const cy = (my - lorePanY) / loreZoom;
+        const hovered = getLoreNodeAtPoint(cx, cy);
+        const hoveredId = hovered?.id || null;
+        if (hoveredId !== loreHoveredNodeId) {
+            loreHoveredNodeId = hoveredId;
+            drawLoreWeb();
+        }
+        const hoveredEdge = hovered ? null : loreEdges.find(item => isNearLoreEdge(cx, cy, item));
+        loreHoveredEdgeId = hoveredEdge?.id || null;
+        if (hovered) {
+            loreCanvas.style.cursor = 'pointer';
+            showWikiTooltipAtPointer({
+                type: 'lore',
+                id: hovered.id,
+                name: hovered.name,
+                category: hovered.category,
+                image_url: hovered.image_url,
+                summary: hovered.description
+            }, e.clientX, e.clientY, true);
+        } else if (hoveredEdge) {
+            loreCanvas.style.cursor = 'pointer';
+            showConnectionTooltip(
+                `${hoveredEdge.lore_a_name} -> ${formatLoreRelationLabel(hoveredEdge.relation_type)} -> ${hoveredEdge.lore_b_name}`,
+                hoveredEdge.description || 'No description added yet.',
+                e.clientX,
+                e.clientY
+            );
+        } else {
+            loreCanvas.style.cursor = 'grab';
+            hideWikiTooltip();
+        }
+    };
+
+    loreCanvas.onmouseup = (e) => {
+        const rect = loreCanvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        const moved = mouseDownPos && Math.hypot(mx - mouseDownPos.x, my - mouseDownPos.y) > 5;
+        if (!moved && Date.now() - mouseDownTime < 300 && !loreDragging) {
+            const cx = (mx - lorePanX) / loreZoom;
+            const cy = (my - lorePanY) / loreZoom;
+            const edge = loreEdges.find(item => isNearLoreEdge(cx, cy, item));
+            if (edge) openEditLoreRelModal(edge);
+        }
+        loreDragging = null;
+        loreIsPanning = false;
+        mouseDownPos = null;
+        loreCanvas.style.cursor = 'grab';
+    };
+
+    loreCanvas.ondblclick = (e) => {
+        const rect = loreCanvas.getBoundingClientRect();
+        const cx = (e.clientX - rect.left - lorePanX) / loreZoom;
+        const cy = (e.clientY - rect.top - lorePanY) / loreZoom;
+        const node = getLoreNodeAtPoint(cx, cy);
+        if (node) openNewLoreRelModal({ preselectLoreA: node.id });
+    };
+
+    loreCanvas.onmouseleave = () => {
+        loreDragging = null;
+        loreIsPanning = false;
+        loreHoveredNodeId = null;
+        loreHoveredEdgeId = null;
+        loreCanvas.style.cursor = 'grab';
+        hideWikiTooltip();
+        drawLoreWeb();
+    };
+
+    if (!loreWebResizeHandler) {
+        loreWebResizeHandler = () => resizeLoreCanvas();
+        window.addEventListener('resize', loreWebResizeHandler);
+    }
+}
+
+function getLoreCategoryColor(category) {
+    const map = {
+        item: '#c9785d',
+        place: '#78b86f',
+        organization: '#d2a854',
+        concept: '#8e73d8',
+        creature: '#cc6f9f',
+        event: '#5f8fd6',
+        other: '#7b6fb0'
+    };
+    return map[category] || '#7b6fb0';
+}
+
+function getLoreCategoryLabel(category) {
+    const map = {
+        item: 'Item',
+        place: 'Place',
+        organization: 'Faction',
+        concept: 'Concept',
+        creature: 'Creature',
+        event: 'Event',
+        other: 'Other'
+    };
+    return map[category] || 'Lore';
+}
+
+async function openLoreWeb() {
+    try {
+        const [items, rels] = await Promise.all([
+            api('GET', `/api/projects/${currentProjectId}/lore`),
+            loadLoreRelationships(currentProjectId)
+        ]);
+        currentLoreItems = items;
+        if (!items.length) {
+            await showNotice('No lore entries yet.', 'Nothing To Show', 'warning');
+            return;
+        }
+        document.getElementById('loreWebProjectName').textContent = `${currentProjectData?.title || ''} - Lore Web`;
+        document.getElementById('loreWebOverlay').style.display = 'flex';
+        document.body.classList.add('rel-web-open');
+        loreCanvas = document.getElementById('loreWebCanvas');
+        loreCtx = loreCanvas.getContext('2d');
+        await new Promise(r => setTimeout(r, 40));
+        resizeLoreCanvas();
+        const width = loreCanvas._cssW || loreCanvas.offsetWidth;
+        const height = loreCanvas._cssH || loreCanvas.offsetHeight;
+        const cx = width / 2;
+        const cy = height / 2;
+        const radius = Math.min(cx, cy) * 0.55;
+        loreZoom = 1;
+        lorePanX = 0;
+        lorePanY = 0;
+        loreNodes = items.map((item, index) => {
+            const angle = (Math.PI * 2 * index) / items.length - Math.PI / 2;
+            return {
+                ...item,
+                x: cx + radius * Math.cos(angle),
+                y: cy + radius * Math.sin(angle),
+                color: getLoreCategoryColor(item.category),
+                shortLabel: (item.name || '?').slice(0, 2).toUpperCase(),
+                img: null
+            };
+        });
+        loreEdges = rels;
+        loreHoveredNodeId = null;
+        loreNodes.forEach(node => {
+            if (node.image_url) {
+                const img = new Image();
+                img.src = node.image_url;
+                img.onload = () => {
+                    node.img = img;
+                    drawLoreWeb();
+                };
+            }
+        });
+        setupLoreCanvasEvents();
+        drawLoreWeb();
+    } catch (e) { console.error('openLoreWeb:', e); }
+}
+
+function loreZoomIn() { loreZoom = Math.min(loreZoom * 1.15, 4); drawLoreWeb(); }
+function loreZoomOut() { loreZoom = Math.max(loreZoom * 0.85, 0.25); drawLoreWeb(); }
+function loreZoomReset() { loreZoom = 1; lorePanX = 0; lorePanY = 0; drawLoreWeb(); }
+
+function closeLoreWeb() {
+    document.getElementById('loreWebOverlay').style.display = 'none';
+    document.body.classList.remove('rel-web-open');
+    loreDragging = null;
+    loreIsPanning = false;
+    loreHoveredNodeId = null;
+    hideWikiTooltip();
+}
+
+function buildTimelineLinks(item, rels) {
+    return rels
+        .filter(rel => rel.lore_a_id === item.id || rel.lore_b_id === item.id)
+        .map(rel => {
+            const otherName = rel.lore_a_id === item.id ? rel.lore_b_name : rel.lore_a_name;
+            return `<span class="timeline-link-chip">${escapeHtml(formatLoreRelationLabel(rel.relation_type))}: ${escapeHtml(otherName)}</span>`;
+        })
+        .join('');
+}
+
+function closeLoreTimeline() {
+    document.getElementById('loreTimelineOverlay').style.display = 'none';
+    document.body.classList.remove('rel-web-open');
+}
+
+function renderLoreTimelineList(items, rels) {
+    loreTimelineEl.innerHTML = items.length ? items.map(item => `
+        <article class="timeline-event" onclick="openEditLoreModal(${item.id})">
+            <div class="timeline-meta">
+                <span class="timeline-date">${escapeHtml(item.event_date || 'Undated Event')}</span>
+                <span class="timeline-order">Order ${item.event_order ?? 0}</span>
+                <span class="timeline-category">${escapeHtml((item.category || 'other').replace('-', ' '))}</span>
+            </div>
+            <div class="timeline-title">${escapeHtml(item.name)}</div>
+            <div class="timeline-desc">${escapeHtml(item.description || 'No description yet.')}</div>
+            <div class="timeline-links">${buildTimelineLinks(item, rels)}</div>
+        </article>
+    `).join('') : '<div class="lore-timeline-empty">No timeline items match this filter yet.</div>';
+}
+
+function applyLoreTimelineFilters() {
+    const category = document.getElementById('loreTimelineCategoryFilter')?.value || 'all';
+    const query = (document.getElementById('loreTimelineSearch')?.value || '').trim().toLowerCase();
+    const filtered = loreTimelineItems.filter(item => {
+        const categoryOk = category === 'all'
+            ? (item.category === 'event' || !!item.event_date)
+            : item.category === category;
+        if (!categoryOk) return false;
+        if (!query) return true;
+        return [item.name, item.description, item.event_date, item.category]
+            .filter(Boolean)
+            .some(value => String(value).toLowerCase().includes(query));
+    });
+    renderLoreTimelineList(filtered, loreTimelineEdges);
+}
+
+async function openLoreTimeline() {
+    try {
+        const [items, rels] = await Promise.all([
+            api('GET', `/api/projects/${currentProjectId}/lore`),
+            loadLoreRelationships(currentProjectId)
+        ]);
+        loreTimelineItems = items
+            .filter(item => item.category === 'event' || item.event_date)
+            .sort((a, b) => (a.event_order ?? 0) - (b.event_order ?? 0) || (a.event_date || '').localeCompare(b.event_date || '') || a.name.localeCompare(b.name));
+        loreTimelineEdges = rels;
+        document.getElementById('loreTimelineProjectName').textContent = `${currentProjectData?.title || ''} - Lore Timeline`;
+        document.getElementById('loreTimelineOverlay').style.display = 'flex';
+        document.body.classList.add('rel-web-open');
+        document.getElementById('loreTimelineCategoryFilter').value = 'all';
+        document.getElementById('loreTimelineSearch').value = '';
+        applyLoreTimelineFilters();
+    } catch (e) { console.error('openLoreTimeline:', e); }
+}
+
+function renderLoreMap(items, rels) {
+    loreMapRelations = rels;
+    const places = items.filter(item => item.category === 'place');
+    const connectionCounts = new Map();
+    rels.forEach(rel => {
+        connectionCounts.set(rel.lore_a_id, (connectionCounts.get(rel.lore_a_id) || 0) + 1);
+        connectionCounts.set(rel.lore_b_id, (connectionCounts.get(rel.lore_b_id) || 0) + 1);
+    });
+    loreMapBoard.querySelectorAll('.lore-map-node').forEach(node => node.remove());
+    loreMapList.innerHTML = places.length ? places.map(item => `
+        <div class="lore-map-list-item" onclick="openEditLoreModal(${item.id})">
+            <div class="lore-map-list-head">
+                <div class="lore-map-node-name">${escapeHtml(item.name)}</div>
+                <div class="lore-map-list-badge">${connectionCounts.get(item.id) || 0} link${(connectionCounts.get(item.id) || 0) === 1 ? '' : 's'}</div>
+            </div>
+            <div class="lore-map-node-meta">${escapeHtml(item.event_date || 'Place')}</div>
+            <div class="lore-map-list-coords">X ${Math.round(item.map_x ?? 50)}% | Y ${Math.round(item.map_y ?? 50)}%</div>
+        </div>
+    `).join('') : '<div class="lore-timeline-empty" style="padding:0;">Add lore entries with the Place / Location category to build the map.</div>';
+
+    places.forEach(item => {
+        const node = document.createElement('button');
+        node.type = 'button';
+        node.className = 'lore-map-node';
+        node.style.left = `${item.map_x ?? 50}%`;
+        node.style.top = `${item.map_y ?? 50}%`;
+        node.dataset.id = item.id;
+        node.innerHTML = `
+            <div class="lore-map-node-name">${escapeHtml(item.name)}</div>
+            <div class="lore-map-node-meta">${escapeHtml(getLoreCategoryLabel(item.category))}</div>
+            <div class="lore-map-node-subtle">${escapeHtml(item.description || 'Double-click to edit')}</div>
+        `;
+        node.addEventListener('dblclick', () => openEditLoreModal(item.id));
+        node.addEventListener('mousedown', (e) => {
+            loreMapDragState = { id: item.id, offsetX: e.offsetX, offsetY: e.offsetY };
+            e.preventDefault();
+        });
+        loreMapBoard.appendChild(node);
+    });
+
+    const placeIds = new Set(places.map(item => item.id));
+    loreMapLines.innerHTML = rels
+        .filter(rel => placeIds.has(rel.lore_a_id) && placeIds.has(rel.lore_b_id))
+        .map(rel => {
+            const a = places.find(item => item.id === rel.lore_a_id);
+            const b = places.find(item => item.id === rel.lore_b_id);
+            if (!a || !b) return '';
+            return `<line class="lore-map-line" x1="${a.map_x}%" y1="${a.map_y}%" x2="${b.map_x}%" y2="${b.map_y}%" stroke="${rel.color || '#5f8fd6'}"></line>`;
+        })
+        .join('');
+}
+
+async function persistLoreMapPosition(id, x, y) {
+    const item = currentLoreItems.find(entry => entry.id === id);
+    if (!item) return;
+    item.map_x = x;
+    item.map_y = y;
+    try {
+        await api('PUT', `/api/lore/${id}`, {
+            name: item.name,
+            category: item.category,
+            description: item.description,
+            image_url: item.image_url,
+            event_date: item.event_date,
+            event_order: item.event_order,
+            map_x: x,
+            map_y: y
+        });
+    } catch (e) { console.error('persistLoreMapPosition:', e); }
+}
+
+function setupLoreMapDrag() {
+    loreMapBoard.onmousemove = (e) => {
+        if (!loreMapDragState) {
+            const rect = loreMapBoard.getBoundingClientRect();
+            const mouseX = ((e.clientX - rect.left) / rect.width) * 100;
+            const mouseY = ((e.clientY - rect.top) / rect.height) * 100;
+            const hoveredEdge = loreMapRelations.find(rel => {
+                const a = currentLoreItems.find(item => item.id === rel.lore_a_id && item.category === 'place');
+                const b = currentLoreItems.find(item => item.id === rel.lore_b_id && item.category === 'place');
+                if (!a || !b) return false;
+                const distance = Math.abs((b.map_y - a.map_y) * mouseX - (b.map_x - a.map_x) * mouseY + b.map_x * a.map_y - b.map_y * a.map_x) /
+                    (Math.hypot(b.map_y - a.map_y, b.map_x - a.map_x) || 1);
+                const minX = Math.min(a.map_x, b.map_x) - 1.5;
+                const maxX = Math.max(a.map_x, b.map_x) + 1.5;
+                const minY = Math.min(a.map_y, b.map_y) - 1.5;
+                const maxY = Math.max(a.map_y, b.map_y) + 1.5;
+                return distance < 1.8 && mouseX >= minX && mouseX <= maxX && mouseY >= minY && mouseY <= maxY;
+            });
+            if (hoveredEdge) {
+                showConnectionTooltip(
+                    `${hoveredEdge.lore_a_name} -> ${formatLoreRelationLabel(hoveredEdge.relation_type)} -> ${hoveredEdge.lore_b_name}`,
+                    hoveredEdge.description || 'No description added yet.',
+                    e.clientX,
+                    e.clientY
+                );
+            } else {
+                hideWikiTooltip();
+            }
+            return;
+        }
+        const rect = loreMapBoard.getBoundingClientRect();
+        const x = Math.min(96, Math.max(4, ((e.clientX - rect.left) / rect.width) * 100));
+        const y = Math.min(94, Math.max(6, ((e.clientY - rect.top) / rect.height) * 100));
+        const item = currentLoreItems.find(entry => entry.id === loreMapDragState.id);
+        if (!item) return;
+        item.map_x = x;
+        item.map_y = y;
+        renderLoreMap(currentLoreItems, loreMapRelations);
+    };
+    loreMapBoard.onmouseup = async () => {
+        if (!loreMapDragState) return;
+        const item = currentLoreItems.find(entry => entry.id === loreMapDragState.id);
+        const id = loreMapDragState.id;
+        loreMapDragState = null;
+        if (item) await persistLoreMapPosition(id, item.map_x ?? 50, item.map_y ?? 50);
+    };
+    loreMapBoard.onmouseleave = async () => {
+        if (loreMapDragState) {
+            const item = currentLoreItems.find(entry => entry.id === loreMapDragState.id);
+            const id = loreMapDragState.id;
+            loreMapDragState = null;
+            if (item) await persistLoreMapPosition(id, item.map_x ?? 50, item.map_y ?? 50);
+        }
+        hideWikiTooltip();
+    };
+}
+
+async function openLoreMap() {
+    try {
+        const [items, rels] = await Promise.all([
+            api('GET', `/api/projects/${currentProjectId}/lore`),
+            loadLoreRelationships(currentProjectId)
+        ]);
+        currentLoreItems = items;
+        document.getElementById('loreMapProjectName').textContent = `${currentProjectData?.title || ''} - Lore Map`;
+        document.getElementById('loreMapOverlay').style.display = 'flex';
+        document.body.classList.add('rel-web-open');
+        renderLoreMap(items, rels);
+        setupLoreMapDrag();
+    } catch (e) { console.error('openLoreMap:', e); }
+}
+
+function closeLoreMap() {
+    document.getElementById('loreMapOverlay').style.display = 'none';
+    document.body.classList.remove('rel-web-open');
+}
+
+function showConnectionTooltip(title, description, x, y) {
+    wikiTooltip.classList.add('compact');
+    document.getElementById('wikiTooltipName').textContent = title || 'Connection';
+    document.getElementById('wikiTooltipType').textContent = 'Connection';
+    const body = document.getElementById('wikiCardBodyFlow');
+    body.innerHTML = `<div class="wiki-card-field"><div class="wiki-card-field-value">${escapeHtml(description || 'No description added yet.')}</div></div>`;
+    const imgWrap = document.querySelector('.wiki-card-flow .wiki-card-img-wrap');
+    const imgEl = document.getElementById('wikiTooltipImgEl');
+    imgEl.src = '';
+    imgWrap.style.display = 'none';
+    wikiTooltip.style.display = 'block';
+    wikiTooltip.style.left = `${Math.min(window.innerWidth - 340, x + 18)}px`;
+    wikiTooltip.style.top = `${Math.min(window.innerHeight - 220, y + 18)}px`;
+}
+
+function attachLoreListHoverTooltips() {
+    loreList.querySelectorAll('.lore-list-entry').forEach(item => {
+        item.addEventListener('mouseenter', handleLoreListHover);
+        item.addEventListener('mousemove', handleLoreListHover);
+        item.addEventListener('mouseleave', hideWikiTooltip);
+    });
+}
+
+function handleLoreListHover(e) {
+    const loreId = parseInt(e.currentTarget.dataset.loreId, 10);
+    const item = currentLoreItems.find(entry => entry.id === loreId);
+    if (!item) return;
+    showWikiTooltipAtPointer({
+        type: 'lore',
+        name: item.name,
+        category: item.category,
+        image_url: item.image_url,
+        summary: item.description || 'No description yet.'
+    }, e.clientX, e.clientY, true);
+}
+
+function renderLore(items) {
+    const catEmoji = {
+        item: '\u2694\uFE0F',
+        place: '\u{1F5FA}\uFE0F',
+        organization: '\u{1F3DB}\uFE0F',
+        concept: '\u2728',
+        creature: '\u{1F409}',
+        event: '\u{1F4C5}',
+        other: '\u{1F4CC}'
+    };
+    if (!items.length) {
+        loreList.innerHTML = '<li class="empty-state">No lore entries yet.</li>';
+        return;
+    }
+    loreList.innerHTML = items.map(i => `
+        <li class="item-list-entry lore-list-entry" data-lore-id="${i.id}" onclick="openEditLoreModal(${i.id})">
+            <span class="item-name" title="${escapeHtml(i.name)}">${escapeHtml(i.name)}</span>
+            <span class="item-badge">${catEmoji[i.category] || '\u2726'}${catEmoji[i.category] ? '' : ` ${escapeHtml(i.category || 'Custom')}`}</span>
+            <button class="item-delete" onclick="deleteLore(event,${i.id})">&times;</button>
+        </li>`).join('');
+    attachLoreListHoverTooltips();
+}
+
+function updateLoreCategoryCustomInput() {
+    const select = document.getElementById('loreCategoryInput');
+    const input = document.getElementById('loreCustomCategoryInput');
+    if (!select || !input) return;
+    const isCustom = select.value === 'custom';
+    input.style.display = isCustom ? 'block' : 'none';
+    input.required = isCustom;
+}
+
+function showWikiTooltipAtPointer(item, x, y, compact = false) {
+    if (!item) return;
+    const signature = `pointer:${item.type || 'entry'}:${item.id || item.name || 'unknown'}:${compact ? 'compact' : 'full'}`;
+    const tooltipEntry = item.type === 'character'
+        ? buildCharacterTooltipEntry(item, { compact })
+        : buildLoreTooltipEntry(item);
+    if (activeTooltipSignature !== signature || wikiTooltip.style.display !== 'block') {
+        if (!renderTooltipCard(tooltipEntry, { compact })) return;
+        activeTooltipSignature = signature;
+        wikiTooltip.style.visibility = 'hidden';
+        wikiTooltip.style.display = 'block';
+    }
+    positionWikiTooltip(x, y);
+    wikiTooltip.style.visibility = 'visible';
 }
 
 // --- WIKI TOOLTIPS ---
@@ -927,153 +2057,9 @@ async function loadWikiData(projectId) {
     catch (e) { console.error('loadWikiData:', e); }
 }
 function escapeRegex(str) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
-// --- WIKI TOOLTIPS ---
-async function loadWikiData(projectId) {
-    try { wikiData = await api('GET', `/api/projects/${projectId}/wiki`); }
-    catch (e) { console.error('loadWikiData:', e); }
-}
 
 let wikiHoverTimer = null;
 let activeTooltipSignature = '';
-
-function handleWikiHover(e) {
-    if (!wikiData || !Object.keys(wikiData).length) return;
-
-    let range;
-    try {
-        if (document.caretRangeFromPoint) {
-            range = document.caretRangeFromPoint(e.clientX, e.clientY);
-        } else if (document.caretPositionFromPoint) {
-            const pos = document.caretPositionFromPoint(e.clientX, e.clientY);
-            if (!pos) return;
-            range = document.createRange();
-            range.setStart(pos.offsetNode, pos.offset);
-            range.setEnd(pos.offsetNode, pos.offset);
-        }
-        if (!range) return;
-        range.expand('word');
-    } catch (e) { return; }
-
-    const sortedKeys = Object.keys(wikiData).sort((a, b) => b.length - a.length);
-    const textNode = range.startContainer;
-    const paraText = textNode?.textContent || '';
-    const paraTextLower = paraText.toLowerCase();
-    const caretOffset = range.startOffset;
-
-    if (!paraTextLower.trim()) { hideWikiTooltip(); return; }
-
-    let matchedKey = null;
-    for (const key of sortedKeys) {
-        const searchKey = key.toLowerCase();
-        let matchIndex = paraTextLower.indexOf(searchKey);
-
-        while (matchIndex !== -1) {
-            const matchEnd = matchIndex + searchKey.length;
-            const beforeChar = matchIndex > 0 ? paraTextLower[matchIndex - 1] : '';
-            const afterChar = matchEnd < paraTextLower.length ? paraTextLower[matchEnd] : '';
-            const startsAtBoundary = !beforeChar || !/[a-z0-9_]/i.test(beforeChar);
-            const endsAtBoundary = !afterChar || !/[a-z0-9_]/i.test(afterChar);
-            const isInsideMatch = caretOffset >= matchIndex && caretOffset <= matchEnd;
-
-            if (startsAtBoundary && endsAtBoundary && isInsideMatch) {
-                matchedKey = key;
-                break;
-            }
-            matchIndex = paraTextLower.indexOf(searchKey, matchIndex + 1);
-        }
-
-        if (matchedKey) {
-            break;
-        }
-    }
-
-    if (!matchedKey) { hideWikiTooltip(); return; }
-
-    // Capture position NOW before any async work
-    const x = e.clientX;
-    const y = e.clientY;
-
-    showWikiTooltip(matchedKey, x, y);
-}
-
-function showWikiTooltip(key, x, y) {
-    // Use already-loaded wikiData — NO await, NO re-fetch here
-    const entry = wikiData[key];
-    if (!entry) return;
-
-    const imgEl = document.getElementById('wikiTooltipImgEl');
-    const imgWrap = document.getElementById('wikiCardImgWrap');
-    const placeholder = document.getElementById('wikiCardPlaceholder');
-    const nameEl = document.getElementById('wikiTooltipName');
-    const typeEl = document.getElementById('wikiTooltipType');
-    const bodyEl = document.getElementById('wikiCardBody');
-
-    nameEl.textContent = entry.name;
-    if (entry.type === 'character') {
-        const parts = [];
-        if (entry.role) parts.push(entry.role);
-        if (entry.age) parts.push(`Age ${entry.age}`);
-        typeEl.textContent = parts.join(' · ') || 'Character';
-    } else {
-        typeEl.textContent = entry.category || 'Lore';
-    }
-
-    // Image: assign onload BEFORE setting src, handle cached images too
-    if (entry.image_url) {
-        const focusPos = 'center center';
-
-        imgEl.onload = () => { imgEl.style.objectPosition = focusPos; };
-        imgEl.onerror = () => { imgWrap.style.display = 'none'; };
-
-        const freshSrc = entry.image_url.startsWith('data:')
-            ? entry.image_url
-            : entry.image_url + '?t=' + Date.now();
-
-        imgEl.src = '';
-        imgEl.src = freshSrc;
-
-        // Fallback: if already cached and complete, onload won't fire
-        if (imgEl.complete && imgEl.naturalWidth > 0) {
-            imgEl.style.objectPosition = focusPos;
-        }
-
-        imgEl.style.display = 'block';
-        imgWrap.style.display = 'block';
-        placeholder.style.display = 'none';
-    } else {
-        imgWrap.style.display = 'none';
-        placeholder.style.display = 'flex';
-    }
-
-    // Body content
-    let bodyHtml = '';
-    if (entry.type === 'character') {
-        if (entry.summary) bodyHtml += `<div class="wiki-card-field"><div class="wiki-card-field-label">Personality</div><div class="wiki-card-field-value">${escapeHtml(entry.summary)}</div></div>`;
-        if (entry.backstory) bodyHtml += `<div class="wiki-card-field"><div class="wiki-card-field-label">Backstory</div><div class="wiki-card-field-value">${escapeHtml(entry.backstory)}</div></div>`;
-        if (entry.appearance) bodyHtml += `<div class="wiki-card-field"><div class="wiki-card-field-label">Appearance</div><div class="wiki-card-field-value">${escapeHtml(entry.appearance)}</div></div>`;
-    } else if (entry.summary) {
-        bodyHtml = `<div class="wiki-card-field"><div class="wiki-card-field-value">${escapeHtml(entry.summary)}</div></div>`;
-    }
-    bodyEl.innerHTML = bodyHtml || `<div class="wiki-card-field-value" style="color:var(--text-muted);font-style:italic;">No details added yet.</div>`;
-
-    wikiTooltip.style.visibility = 'hidden';
-    wikiTooltip.style.display = 'block';
-
-    // Position tooltip after layout so the card can size to the full image.
-    const cW = wikiTooltip.offsetWidth || 360;
-    const cH = wikiTooltip.offsetHeight || 420;
-    let left = x + 20;
-    let top = y - 60;
-    if (left + cW > window.innerWidth - 20) left = x - cW - 20;
-    if (top + cH > window.innerHeight - 20) top = window.innerHeight - cH - 20;
-    if (top < 10) top = 10;
-
-    wikiTooltip.style.left = `${left}px`;
-    wikiTooltip.style.top = `${top}px`;
-    wikiTooltip.style.visibility = 'visible';
-}
-
-function hideWikiTooltip() { wikiTooltip.style.display = 'none'; }
 
 function ensureWikiTooltipLayout() {
     const cardContent = wikiTooltip.querySelector('.wiki-card-content');
@@ -1268,57 +2254,6 @@ function renderTooltipCard(entry, { compact = false } = {}) {
     return true;
 }
 
-function buildCharacterTooltipEntry(character, { compact = false } = {}) {
-    const titleList = Array.isArray(character.titles) ? character.titles.filter(Boolean) : [];
-    const meta = [character.role, ...titleList, character.age ? `Age ${character.age}` : ''].filter(Boolean).join(' · ') || 'Character';
-    const fields = [];
-
-    if (compact) {
-        if (titleList.length) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Titles</div><div class="wiki-card-field-value">${escapeHtml(titleList.join(', '))}</div></div>`);
-        if (character.role) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Role</div><div class="wiki-card-field-value">${escapeHtml(character.role)}</div></div>`);
-        if (character.age) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Age</div><div class="wiki-card-field-value">${escapeHtml(character.age)}</div></div>`);
-        if (character.appearance) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Appearance</div><div class="wiki-card-field-value">${escapeHtml(character.appearance)}</div></div>`);
-    } else {
-        if (titleList.length) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Titles</div><div class="wiki-card-field-value">${escapeHtml(titleList.join(', '))}</div></div>`);
-        if (character.personality) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Personality</div><div class="wiki-card-field-value">${escapeHtml(character.personality)}</div></div>`);
-        if (character.backstory) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Backstory</div><div class="wiki-card-field-value">${escapeHtml(character.backstory)}</div></div>`);
-        if (character.appearance) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Appearance</div><div class="wiki-card-field-value">${escapeHtml(character.appearance)}</div></div>`);
-        if (character.extra_notes) fields.push(`<div class="wiki-card-field"><div class="wiki-card-field-label">Notes</div><div class="wiki-card-field-value">${escapeHtml(character.extra_notes)}</div></div>`);
-    }
-
-    return {
-        name: character.name || '',
-        meta,
-        image_url: character.image_url || '',
-        bodyHtml: fields.join('')
-    };
-}
-
-function buildWikiTooltipEntry(entry) {
-    if (entry.type === 'character') {
-        return buildCharacterTooltipEntry({
-            name: entry.name,
-            role: entry.role || '',
-            age: entry.age || '',
-            titles: entry.titles || [],
-            image_url: entry.image_url || '',
-            personality: entry.summary || '',
-            backstory: entry.backstory || '',
-            appearance: entry.appearance || '',
-            extra_notes: ''
-        });
-    }
-
-    return {
-        name: entry.name || '',
-        meta: entry.category || 'Lore',
-        image_url: entry.image_url || '',
-        bodyHtml: entry.summary
-            ? `<div class="wiki-card-field"><div class="wiki-card-field-value">${escapeHtml(entry.summary)}</div></div>`
-            : ''
-    };
-}
-
 function showCharacterHoverTooltip(character, x, y, { compact = false } = {}) {
     const signature = `character:${character.id}:${compact ? 'compact' : 'full'}`;
     if (activeTooltipSignature !== signature || wikiTooltip.style.display !== 'block') {
@@ -1333,7 +2268,7 @@ function showCharacterHoverTooltip(character, x, y, { compact = false } = {}) {
 
 function buildCharacterTooltipEntry(character, { compact = false } = {}) {
     const titleList = Array.isArray(character.titles) ? character.titles.filter(Boolean) : [];
-    const meta = [character.role, character.age ? `Age ${character.age}` : ''].filter(Boolean).join(' · ') || 'Character';
+    const meta = [character.role, character.age ? `Age ${character.age}` : ''].filter(Boolean).join(' | ') || 'Character';
     const fields = [];
 
     if (compact) {
@@ -1350,12 +2285,23 @@ function buildCharacterTooltipEntry(character, { compact = false } = {}) {
     return {
         name: character.name || '',
         meta,
-        titlesText: titleList.join(' · '),
+        titlesText: titleList.join(' | '),
         image_url: character.image_url || '',
         bodyHtml: fields.join('')
     };
 }
 
+function buildLoreTooltipEntry(entry) {
+    return {
+        name: entry.name || '',
+        meta: entry.category ? `Lore | ${getLoreCategoryLabel(entry.category)}` : 'Lore',
+        titlesText: '',
+        image_url: entry.image_url || '',
+        bodyHtml: entry.summary
+            ? `<div class="wiki-card-field"><div class="wiki-card-field-value">${escapeHtml(entry.summary)}</div></div>`
+            : ''
+    };
+}
 function buildWikiTooltipEntry(entry) {
     if (entry.type === 'character') {
         return buildCharacterTooltipEntry({
@@ -1371,37 +2317,7 @@ function buildWikiTooltipEntry(entry) {
         });
     }
 
-    return {
-        name: entry.name || '',
-        meta: entry.category || 'Lore',
-        titlesText: '',
-        image_url: entry.image_url || '',
-        bodyHtml: entry.summary
-            ? `<div class="wiki-card-field"><div class="wiki-card-field-value">${escapeHtml(entry.summary)}</div></div>`
-            : ''
-    };
-}
-
-// --- NOTES PANEL ---
-let notesAutoSaveTimer = null;
-let notesPanelOpen = false;
-
-async function loadNotes(projectId) {
-    try {
-        const note = await api('GET', `/api/projects/${projectId}/notes`);
-        document.getElementById('notesTextarea').value = note.content || '';
-        setNotesSaveStatus('');
-    } catch (e) { console.error('loadNotes:', e); }
-}
-
-async function saveNotes() {
-    if (!currentProjectId) return;
-    setNotesSaveStatus('Saving...');
-    try {
-        await api('PUT', `/api/projects/${currentProjectId}/notes`, { content: document.getElementById('notesTextarea').value });
-        setNotesSaveStatus('Saved ✓');
-        setTimeout(() => setNotesSaveStatus(''), 2000);
-    } catch (e) { setNotesSaveStatus('Error'); console.error('saveNotes:', e); }
+    return buildLoreTooltipEntry(entry);
 }
 
 function setNotesSaveStatus(msg) { const el = document.getElementById('notesSaveStatus'); if (el) el.textContent = msg; }
@@ -1437,7 +2353,7 @@ function enterFocusMode() {
     clearTimeout(hintHideTimer);
     hintHideTimer = setTimeout(() => hint.classList.remove('visible'), 3000);
     updateFocusWordCount(); startCursorHide();
-    document.getElementById('focusModeBtn').textContent = '⛶ Exit Focus';
+    document.getElementById('focusModeBtn').textContent = 'Exit Focus';
 }
 
 function exitFocusMode() {
@@ -1445,7 +2361,7 @@ function exitFocusMode() {
     document.body.classList.remove('focus-mode', 'hide-cursor');
     clearTimeout(cursorHideTimer);
     document.getElementById('focusExitHint').classList.remove('visible');
-    document.getElementById('focusModeBtn').textContent = '⛶ Focus';
+    document.getElementById('focusModeBtn').textContent = 'Focus';
 }
 
 function toggleFocusMode() { isFocusMode ? exitFocusMode() : enterFocusMode(); }
@@ -1506,7 +2422,7 @@ function renderSearchResults(query) {
     }
     const groups = { chapter: [], scene: [], character: [], lore: [] };
     searchResults.forEach(r => { if (groups[r.type]) groups[r.type].push(r); });
-    const labels = { chapter: '📄 Chapters', scene: '⚡ Scenes', character: '👤 Characters', lore: '📖 Lore' };
+    const labels = { chapter: 'Chapters', scene: 'Scenes', character: 'Characters', lore: 'Lore' };
     let html = '', idx = 0;
     for (const [type, items] of Object.entries(groups)) {
         if (!items.length) continue;
@@ -1578,21 +2494,40 @@ let relIsPanning = false, relPanStart = { x: 0, y: 0 };
 let relCanvas = null, relCtx = null;
 let relHoveredNodeId = null;
 const RELATION_TYPE_OPTIONS = [
-    ['allies', 'Allies'],
-    ['rivals', 'Rivals'],
-    ['lovers', 'Lovers'],
-    ['enemies', 'Enemies'],
-    ['family', 'Family'],
-    ['mentor', 'Mentor / Student'],
-    ['friends', 'Friends'],
-    ['complicated', 'Complicated'],
-    ['strangers', 'Strangers'],
+    ['allies', '\u{1F91D} Allies'],
+    ['rivals', '\u2694\uFE0F Rivals'],
+    ['lovers', '\u{1F495} Lovers'],
+    ['enemies', '\u{1F5A4} Enemies'],
+    ['family', '\u{1F468}\u200D\u{1F469}\u200D\u{1F467} Family'],
+    ['mentor', '\u{1F9ED} Mentor / Student'],
+    ['friends', '\u{1F60A} Friends'],
+    ['complicated', '\u{1F300} Complicated'],
+    ['strangers', '\u{1F465} Strangers'],
+    ['custom', '\u2726 Custom']
+];
+const LORE_RELATION_TYPE_OPTIONS = [
+    ['related to', 'Related To'],
+    ['part of', 'Part Of'],
+    ['belongs to', 'Belongs To'],
+    ['located in', 'Located In'],
+    ['created by', 'Created By'],
+    ['caused by', 'Caused By'],
+    ['used by', 'Used By'],
+    ['guards', 'Guards'],
+    ['enemy of', 'Enemy Of'],
+    ['descended from', 'Descended From'],
     ['custom', 'Custom']
 ];
 
 function formatRelationLabel(value) {
     if (!value) return 'Relationship';
     const preset = RELATION_TYPE_OPTIONS.find(([key]) => key === value);
+    return preset ? preset[1] : value;
+}
+
+function formatLoreRelationLabel(value) {
+    if (!value) return 'Related To';
+    const preset = LORE_RELATION_TYPE_OPTIONS.find(([key]) => key === value);
     return preset ? preset[1] : value;
 }
 
@@ -1680,7 +2615,7 @@ function renderRelationshipsList(rels) {
 async function openNewRelModal(options = {}) {
     try {
         const chars = await api('GET', `/api/projects/${currentProjectId}/characters`);
-        if (chars.length < 2) { alert('You need at least 2 characters!'); return; }
+        if (chars.length < 2) { await showNotice('You need at least 2 characters first.', 'Not Enough Characters', 'warning'); return; }
         const charOptions = chars.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
         document.getElementById('relCharAInput').innerHTML = charOptions;
         document.getElementById('relCharBInput').innerHTML = charOptions;
@@ -1719,7 +2654,7 @@ function openEditRelModal(edge) {
 async function createRelationship() {
     const charA = parseInt(document.getElementById('relCharAInput').value);
     const charB = parseInt(document.getElementById('relCharBInput').value);
-    if (charA === charB) { alert('Select two different characters!'); return; }
+    if (charA === charB) { await showNotice('Select two different characters.', 'Choose Different Characters', 'warning'); return; }
     const relationType = getSelectedRelationType('new');
     if (!relationType) {
         document.getElementById('relCustomTypeInput')?.focus();
@@ -1773,8 +2708,8 @@ async function openRelWeb() {
             api('GET', `/api/projects/${currentProjectId}/characters`),
             api('GET', `/api/projects/${currentProjectId}/relationships`)
         ]);
-        if (!chars.length) { alert('No characters in this project yet!'); return; }
-        document.getElementById('relWebProjectName').textContent = (currentProjectData?.title || '') + ' — Character Web';
+        if (!chars.length) { await showNotice('No characters in this project yet.', 'Nothing To Show', 'warning'); return; }
+        document.getElementById('relWebProjectName').textContent = `${currentProjectData?.title || ''} - Character Web`;
         document.getElementById('relWebOverlay').style.display = 'flex';
         document.body.classList.add("rel-web-open");
         relCanvas = document.getElementById('relWebCanvas');
@@ -1849,8 +2784,6 @@ function drawRelWeb() {
         const key = [Math.min(edge.char_a_id, edge.char_b_id), Math.max(edge.char_a_id, edge.char_b_id)].join('-');
         pairCount[key] = (pairCount[key] || 0) + 1;
     });
-
-    const relTypeEmoji = { allies: '🤝', rivals: '⚔️', lovers: '💕', enemies: '🖤', family: '👨‍👩‍👧', mentor: '🧭', friends: '😊', complicated: '🌀', strangers: '👥' };
 
     relEdges.forEach(edge => {
         const nodeA = relNodes.find(n => n.id === edge.char_a_id);
@@ -2092,13 +3025,13 @@ function updateTabTitle(id, title) {
 }
 
 function renderTabs() {
-    const icon = { chapter: '📄', scene: '⚡' };
+    const icon = { chapter: '\u{1F4C4}', scene: '\u26A1' };
     openTabsEl.innerHTML = openTabs.map(t => `
         <div class="open-tab ${t.id === currentDocId && t.type === currentDocType ? 'active' : ''}"
              data-id="${t.id}" data-type="${t.type}" onclick="openDocument(${t.id},'${t.type}')">
-            <span style="font-size:11px;margin-right:4px;">${icon[t.type] || '📄'}</span>
+            <span style="font-size:11px;margin-right:4px;">${icon[t.type] || '\u{1F4C4}'}</span>
             <span class="open-tab-name">${escapeHtml(t.title)}</span>
-            <button class="open-tab-close" onclick="closeTab(event,${t.id},'${t.type}')">×</button>
+            <button class="open-tab-close" onclick="closeTab(event,${t.id},'${t.type}')">&times;</button>
         </div>`).join('');
 }
 
@@ -2129,12 +3062,16 @@ function loadFromLocalStorage(key) {
 
 function clearLocalStorage(key) { try { localStorage.removeItem(getLocalKey(key)); } catch (e) { } }
 
-function checkLocalStorageRestore(key, serverContent) {
+async function checkLocalStorageRestore(key, serverContent) {
     const backup = loadFromLocalStorage(key);
     if (!backup) return false;
     if (Date.now() - backup.savedAt > 86400000) { clearLocalStorage(key); return false; }
     if (backup.content !== serverContent) {
-        if (confirm(`📋 Unsaved changes found from ${formatTimeAgo(backup.savedAt)}.\n\nRestore them?`)) {
+        const shouldRestore = await showDecision(
+            `Unsaved changes found from ${formatTimeAgo(backup.savedAt)}.\n\nRestore them?`,
+            { title: 'Restore Unsaved Changes?', confirmText: 'Restore', cancelText: 'Discard', tone: 'warning' }
+        );
+        if (shouldRestore) {
             quill.root.innerHTML = backup.content || ''; docTitleInput.value = backup.title || '';
             setSaveStatus('unsaved'); return true;
         } else { clearLocalStorage(key); }
@@ -2152,7 +3089,7 @@ function startAutoSave() {
     stopAutoSave(); secondsUntilSave = 30;
     countdownTimer = setInterval(() => {
         secondsUntilSave--;
-        if (saveStatus.classList.contains('unsaved') && secondsUntilSave > 0) saveStatus.textContent = `● Saving in ${secondsUntilSave}s`;
+        if (saveStatus.classList.contains('unsaved') && secondsUntilSave > 0) saveStatus.textContent = `Saving in ${secondsUntilSave}s`;
         if (secondsUntilSave <= 0) secondsUntilSave = 30;
     }, 1000);
     autoSaveTimer = setInterval(async () => {
@@ -2170,10 +3107,15 @@ function resetCountdown() { secondsUntilSave = 30; }
 
 // --- OFFLINE/ONLINE ---
 window.addEventListener('online', async () => {
-    if (pendingSync && currentDocId && currentDocType === 'chapter') {
+    updateSaveButtonState();
+    if (pendingSync && canAttemptDriveSync() && currentDocId && currentDocType === 'chapter') {
         setSaveStatus('syncing');
         try { await saveDocument(); pendingSync = false; } catch (e) { }
     }
+});
+
+window.addEventListener('offline', () => {
+    updateSaveButtonState();
 });
 
 // --- STATS ---
@@ -2224,12 +3166,15 @@ function hideEditor() {
 }
 
 function setSaveStatus(status) {
-    const map = { saved: '✓ Saved', saving: 'Saving...', syncing: '↑ Syncing...', synced: '✓ Synced', unsaved: '● Unsaved', error: '✗ Error', '': '' };
+    const map = { saved: 'Saved', saving: 'Saving...', syncing: 'Syncing...', synced: 'Synced', unsaved: 'Unsaved', error: 'Error', '': '' };
     saveStatus.textContent = map[status] ?? status;
     saveStatus.className = 'save-status ' + status;
 }
 
-function enableHeaderBtns(on) { saveBtn.disabled = exportPdfBtn.disabled = exportDocxBtn.disabled = !on; }
+function enableHeaderBtns(on) {
+    saveBtn.disabled = exportPdfBtn.disabled = exportDocxBtn.disabled = !on;
+    updateSaveButtonState();
+}
 
 function escapeHtml(str) {
     if (!str) return '';
@@ -2262,8 +3207,8 @@ let isDark = localStorage.getItem('scripvia_theme') !== 'light';
 
 function applyTheme() {
     document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
-    document.getElementById('themeIcon').textContent = isDark ? '🌙' : '☀️';
-    document.getElementById('themeLabel').textContent = isDark ? 'Dark' : 'Light';
+    document.getElementById('themeIcon').textContent = isDark ? '\u{1F319}' : '\u2600\uFE0F';
+    document.getElementById('themeLabel').textContent = isDark ? 'Dark Mode' : 'Light Mode';
     localStorage.setItem('scripvia_theme', isDark ? 'dark' : 'light');
 }
 
@@ -2302,26 +3247,39 @@ async function checkAuthState() {
         const data = await api('GET', '/auth/me');
         const loginBtn = document.getElementById('loginBtn');
         const userInfo = document.getElementById('userInfo');
+        const userAvatar = document.getElementById('userAvatar');
         if (data.logged_in) {
+            authState = { loggedIn: true, mode: 'account' };
             storageScopeKey = data.scope_key || `user_${data.user.id}`;
             loginBtn.style.display = 'none'; userInfo.classList.remove('hidden');
-            document.getElementById('userAvatar').src = data.user.picture;
+            userAvatar.style.display = 'block';
+            userAvatar.src = data.user.picture;
             document.getElementById('userName').textContent = data.user.name.split(' ')[0];
         } else {
+            authState = { loggedIn: false, mode: 'guest' };
+            pendingSync = false;
             storageScopeKey = data.scope_key || localStorage.getItem('scripvia_guest_scope') || `guest_${Date.now()}`;
             localStorage.setItem('scripvia_guest_scope', storageScopeKey);
             const guest = localStorage.getItem('scripvia_guest');
             if (guest) showGuestUser(JSON.parse(guest).name);
             else { loginBtn.style.display = 'flex'; userInfo.classList.add('hidden'); }
         }
-    } catch (e) { console.error('checkAuthState:', e); }
+        updateSaveButtonState();
+    } catch (e) {
+        console.error('checkAuthState:', e);
+        authState = { loggedIn: false, mode: 'guest' };
+        updateSaveButtonState();
+    }
 }
 
 function showGuestUser(name) {
+    authState = { loggedIn: false, mode: 'guest' };
+    pendingSync = false;
     document.getElementById('loginBtn').style.display = 'none';
     document.getElementById('userInfo').classList.remove('hidden');
     document.getElementById('userName').textContent = name + ' (guest)';
     document.getElementById('userAvatar').style.display = 'none';
+    updateSaveButtonState();
 }
 
 // --- EVENT LISTENERS ---
@@ -2353,7 +3311,10 @@ document.getElementById('cancelSceneBtn').addEventListener('click', () => closeM
 document.getElementById('cancelSceneBtnX').addEventListener('click', () => closeModal(newSceneModal));
 document.getElementById('confirmSceneBtn').addEventListener('click', createScene);
 
-document.getElementById('newLoreBtn').addEventListener('click', () => openModal(newLoreModal));
+document.getElementById('newLoreBtn').addEventListener('click', () => {
+    resetLoreModal();
+    openModal(newLoreModal);
+});
 document.getElementById('cancelLoreBtn').addEventListener('click', () => { resetLoreModal(); closeModal(newLoreModal); });
 document.getElementById('cancelLoreBtnX').addEventListener('click', () => { resetLoreModal(); closeModal(newLoreModal); });
 document.getElementById('confirmLoreBtn').addEventListener('click', () => {
@@ -2365,6 +3326,7 @@ saveBtn.addEventListener('click', saveDocument);
 
 // --- INIT ---
 document.addEventListener('DOMContentLoaded', () => {
+    updateSaveButtonState();
 
     ensureWikiTooltipLayout();
     ensureRelationTypeInputs();
@@ -2377,17 +3339,42 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('searchBtn').addEventListener('click', openSearch);
     document.getElementById('newRelBtn').addEventListener('click', openNewRelModal);
     document.getElementById('viewRelWebBtn').addEventListener('click', openRelWeb);
+    document.getElementById('newLoreRelBtn').addEventListener('click', () => openNewLoreRelModal());
+    document.getElementById('viewLoreWebBtn').addEventListener('click', openLoreWeb);
+    document.getElementById('viewLoreTimelineBtn').addEventListener('click', openLoreTimeline);
+    document.getElementById('viewLoreMapBtn').addEventListener('click', openLoreMap);
     document.getElementById('relWebClose').addEventListener('click', closeRelWeb);
     document.getElementById('relWebAddBtn').addEventListener('click', () => openNewRelModal());
+    document.getElementById('loreWebClose').addEventListener('click', closeLoreWeb);
+    document.getElementById('loreWebAddBtn').addEventListener('click', () => openNewLoreRelModal());
+    document.getElementById('loreTimelineClose').addEventListener('click', closeLoreTimeline);
+    document.getElementById('loreMapClose').addEventListener('click', closeLoreMap);
+    document.getElementById('loreMapHelpBtn').addEventListener('click', () => {
+        showNotice('Drag location nodes around the board to arrange your world map. Double-click a place to edit it.', 'Lore Map Help', 'info');
+    });
+    document.getElementById('loreTimelineCategoryFilter').addEventListener('change', applyLoreTimelineFilters);
+    document.getElementById('loreTimelineSearch').addEventListener('input', applyLoreTimelineFilters);
     document.getElementById('cancelRelBtn').addEventListener('click', () => closeModal(newRelModal));
     document.getElementById('cancelRelBtnX').addEventListener('click', () => closeModal(newRelModal));
     document.getElementById('confirmRelBtn').addEventListener('click', createRelationship);
     document.getElementById('confirmEditRelBtn').addEventListener('click', saveEditRel);
+    document.getElementById('cancelLoreRelBtn').addEventListener('click', () => closeModal(newLoreRelModal));
+    document.getElementById('cancelLoreRelBtnX').addEventListener('click', () => closeModal(newLoreRelModal));
+    document.getElementById('confirmLoreRelBtn').addEventListener('click', createLoreRelationship);
+    document.getElementById('cancelEditLoreRelBtn').addEventListener('click', () => closeModal(document.getElementById('editLoreRelModal')));
+    document.getElementById('cancelEditLoreRelBtnX').addEventListener('click', () => closeModal(document.getElementById('editLoreRelModal')));
+    document.getElementById('confirmEditLoreRelBtn').addEventListener('click', saveEditLoreRel);
+    document.getElementById('deleteLoreRelFromEditBtn').addEventListener('click', deleteLoreRelFromEdit);
+    document.getElementById('loreRelTypeInput').addEventListener('change', () => updateLoreRelationCustomInput('new'));
+    document.getElementById('editLoreRelTypeInput').addEventListener('change', () => updateLoreRelationCustomInput('edit'));
     document.getElementById('relTypeInput').addEventListener('change', () => updateRelationCustomInput('new'));
     document.getElementById('editRelTypeInput').addEventListener('change', () => updateRelationCustomInput('edit'));
     document.getElementById('cancelEditRelBtn').addEventListener('click', () => closeModal(document.getElementById('editRelModal')));
     document.getElementById('cancelEditRelBtnX').addEventListener('click', () => closeModal(document.getElementById('editRelModal')));
     document.getElementById('deleteRelFromEditBtn').addEventListener('click', deleteRelFromEdit);
+    document.getElementById('loreCategoryInput').addEventListener('change', updateLoreCategoryCustomInput);
+    document.getElementById('loreMapXInput').addEventListener('input', updateLoreMapInputLabels);
+    document.getElementById('loreMapYInput').addEventListener('input', updateLoreMapInputLabels);
 
     document.querySelectorAll('#relColorPicker .rel-color-opt').forEach(opt => {
         opt.addEventListener('click', () => {
@@ -2401,14 +3388,31 @@ document.addEventListener('DOMContentLoaded', () => {
             opt.classList.add('selected'); editRelColor = opt.dataset.color;
         });
     });
+    document.querySelectorAll('#loreRelColorPicker .rel-color-opt').forEach(opt => {
+        opt.addEventListener('click', () => {
+            document.querySelectorAll('#loreRelColorPicker .rel-color-opt').forEach(o => o.classList.remove('selected'));
+            opt.classList.add('selected'); loreRelSelectedColor = opt.dataset.color;
+        });
+    });
+    document.querySelectorAll('#editLoreRelColorPicker .rel-color-opt').forEach(opt => {
+        opt.addEventListener('click', () => {
+            document.querySelectorAll('#editLoreRelColorPicker .rel-color-opt').forEach(o => o.classList.remove('selected'));
+            opt.classList.add('selected'); editLoreRelColor = opt.dataset.color;
+        });
+    });
 
     fetch('/auth/me').then(r => r.json()).then(data => {
         if (!data.logged_in && !localStorage.getItem('scripvia_guest')) { window.location.href = '/login'; return; }
         applyTheme(); applySidebar(); initQuill(); loadProjects(); checkAuthState();
     }).catch(() => { applyTheme(); applySidebar(); initQuill(); loadProjects(); });
+    populateLoreRelationTypeSelects();
+    document.querySelector('#loreWebOverlay .rel-web-hint').textContent = 'Scroll to zoom | Drag canvas to pan | Click connection to edit | Double-click a lore node to connect it';
     setupImageUpload('charImageFile', 'charImageInput', 'charImgPreview', 'charImgPreviewEl', 'clearCharImg', true);
     setupImageUpload('loreImageFile', 'loreImageInput', 'loreImgPreview', 'loreImgPreviewEl', 'clearLoreImg', false);
+    updateLoreCategoryCustomInput();
+    updateLoreMapInputLabels();
     document.getElementById('cropConfirmBtn')?.addEventListener('click', confirmCrop);
     document.getElementById('cropModalClose')?.addEventListener('click', () => closeModal(document.getElementById('cropModal')));
     document.getElementById('cropCancelBtn')?.addEventListener('click', () => closeModal(document.getElementById('cropModal')));
 });
+
