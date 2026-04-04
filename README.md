@@ -2,336 +2,322 @@
 
 > *Write anything. Remember everything.*
 
-Scripvia is a personal writing app built for writers who want more than just a text editor — it's a full creative workspace with worldbuilding tools, character management, an interactive relationship web, Google Drive sync, and a beautiful distraction-free writing experience. Built from scratch with love for the craft of storytelling.
+Scripvia is a local-first writing app built for long-form projects, worldbuilding, and creative planning. It blends a rich writing editor with characters, scenes, lore tools, relationship webs, notes, search, export, and optional Google Drive sync, all inside one focused workspace.
 
 ---
 
-## ✨ Features at a Glance
+## ✨ Features At a Glance
 
 | Feature | Description |
 |---------|-------------|
-| 📝 Rich Text Editor | Quill.js powered, full formatting |
-| 🎭 Genre System | Unlocks creative tools per genre |
-| 👤 Characters | Profiles, images, wiki tooltips |
-| ⚡ Scenes | Mood-tagged scene capture |
-| 📖 Lore | World-building wiki |
-| 🕸️ Relationship Web | Interactive character connection canvas |
-| 🔍 Search | Full-text search across everything |
-| 📝 Notes Panel | Slide-in project notepad |
-| ☁️ Google Drive Sync | Auto background sync |
-| 📤 Export | PDF + DOCX, single chapter or full project |
-| 🎯 Focus Mode | Distraction-free fullscreen writing |
-| 🖥️ Desktop App | Electron-powered native window |
+| 📝 Rich Text Editor | Quill-powered writing with formatting, autosave, and restore |
+| 🎭 Genre System | Creative genres unlock the full storytelling toolkit |
+| 👤 Characters | Profiles, aliases, images, notes, and hover wiki cards |
+| ⚡ Scenes | Mood-tagged scene drafting in full editor tabs |
+| 📖 Lore | Entries, custom categories, timeline data, and map placement |
+| 🕸️ Character Web | Interactive relationship canvas between characters |
+| 🔗 Lore Web | Visual connection map for worldbuilding entries |
+| 🗓️ Lore Timeline | Timeline view for events and dated lore |
+| 🗺️ Lore Map | Drag places around a visual map board |
+| 🔍 Search | Project-wide search across writing and reference content |
+| 📝 Notes Panel | Slide-out project notes with autosave |
+| ☁️ Google Drive Sync | Optional background sync for writing and project data |
+| 📤 Export | PDF and DOCX export for chapters and full projects |
+| 🎯 Focus Mode | Fullscreen distraction-free writing |
+| 🖥️ Desktop App | Run in browser or via native desktop launcher |
 
 ---
 
-## 🎭 Genre System — Unlock Your Creative Tools
+## 🎭 Genre System
 
-When creating a project, Scripvia asks you to pick a genre. This isn't just a label — it **unlocks an entire set of creative tools** tailored for fiction writers.
+When you create a project, Scripvia asks for a genre. In creative genres, that choice unlocks the full story-planning toolkit.
 
-**Creative genres** that unlock the full toolkit:
+### Creative genres
 
-| Genre | Emoji | Unlocks |
-|-------|-------|---------|
-| Fantasy | ⚔️ | Characters, Scenes, Lore, Relationship Web |
-| Sci-Fi | 🚀 | Characters, Scenes, Lore, Relationship Web |
-| Fiction | 📖 | Characters, Scenes, Lore, Relationship Web |
-| Romance | 💕 | Characters, Scenes, Lore, Relationship Web |
-| Mystery | 🔍 | Characters, Scenes, Lore, Relationship Web |
-| Thriller | ⚡ | Characters, Scenes, Lore, Relationship Web |
-| Horror | 🕯️ | Characters, Scenes, Lore, Relationship Web |
-| Historical Fiction | 🏛️ | Characters, Scenes, Lore, Relationship Web |
+| Genre | Unlocks |
+|-------|---------|
+| ⚔️ Fantasy | Characters, Scenes, Lore, Web tools |
+| 🚀 Sci-Fi | Characters, Scenes, Lore, Web tools |
+| 📖 Fiction | Characters, Scenes, Lore, Web tools |
+| 💕 Romance | Characters, Scenes, Lore, Web tools |
+| 🔍 Mystery | Characters, Scenes, Lore, Web tools |
+| ⚡ Thriller | Characters, Scenes, Lore, Web tools |
+| 🕯️ Horror | Characters, Scenes, Lore, Web tools |
+| 🏛️ Historical | Characters, Scenes, Lore, Web tools |
 
-**Non-creative genres** (Chapters only — no extra tabs):
+### Simpler project types
 
-- 📝 General / Notes
-- 📓 Journal / Diary
-- 🎬 Screenplay
-- ✨ Poetry
-- 📌 Other
-
-When you select a creative genre, the sidebar automatically shows the **Characters, Scenes, Lore and Web tabs**. These tabs stay hidden for non-creative projects to keep things clean. The Project Overview page also shows/hides the relevant quick-action buttons based on your genre.
+For non-creative genres, Scripvia keeps the workspace lighter by focusing on chapters and core writing tools.
 
 ---
 
-## 📝 Writing & Editor
+## 📝 Writing Experience
 
 ### Rich Text Editor
-Powered by **Quill.js** with a full formatting toolbar:
-- Headings (H1, H2, H3)
-- Bold, italic, underline, strikethrough
-- Text colour and background colour
-- Ordered and unordered lists
-- Blockquotes and code blocks
-- Text alignment and indentation
-- Hyperlinks
-- Clean formatting button
 
-### VS Code-Style Open Tabs
-- Open multiple chapters and scenes simultaneously
-- Tabs appear at the top of the editor just like VS Code
-- Each tab shows a type icon (📄 chapter, ⚡ scene)
-- Click the × on any tab to close it — automatically switches to the last open tab
-- Active tab highlighted with an accent underline
+The editor supports:
 
-### Auto-Save System
-- **Auto-saves every 30 seconds** with a live countdown shown in the save status
-- **localStorage backup on every single keystroke** — you never lose a word
-- If you close the app with unsaved changes, the next time you open that document it asks if you want to restore the backup
-- Backup detection is smart — only prompts if the backup is newer than what's on the server and less than 24 hours old
-- Save status indicator shows: Unsaved → Saving → Syncing → Synced
+- Headings
+- Bold, italic, underline, and strike
+- Text color and highlight
+- Lists, blockquotes, and code blocks
+- Alignment and indentation
+- Links and formatting cleanup
 
-### Stats Bar
-Live stats displayed at the bottom of every document:
-- **Word count** — updates as you type
-- **Character count** — updates as you type
-- **Estimated read time** — calculated at 200 words per minute
-- **Last saved time** — exact time of last successful save
+### VS Code-Style Tabs
 
----
+- Open multiple chapters and scenes at once
+- Switch between them from a tabs bar
+- Scene tabs use a lightning icon
+- Closing one tab returns you to the previous open item
 
-## 🎯 Focus Mode
+### Auto-Save + Restore
 
-The ultimate distraction-free writing experience.
+- Autosaves every 30 seconds
+- Stores a local backup on every keystroke
+- Prompts to restore newer unsaved local changes
+- Tracks save state visually: Unsaved, Saving, Syncing, Synced
 
-- Press **`F11`** or click **⛶ Focus** in the header
-- Everything disappears — sidebar, toolbar, header, stats bar, notes panel
-- Only your words remain on screen
-- **Cursor auto-hides** after 3 seconds of no mouse movement — move the mouse to bring it back
-- A floating **word count** appears in the bottom right corner
-- An **exit hint** fades in briefly at the bottom telling you how to leave
-- Press **`Esc`** or **`F11`** to exit focus mode and return to the full editor
+### Live Writing Stats
+
+- Word count
+- Character count
+- Estimated read time
+- Last saved time
+
+### Focus Mode
+
+- Toggle with `F11`
+- Hides surrounding UI for immersive drafting
+- Shows a floating word count
+- Supports `Esc` to exit quickly
+- Auto-hides the cursor after inactivity
+
+### Workspace Comfort
+
+- 🌙 Light and dark theme toggle
+- 📚 Collapsible sidebar
 
 ---
 
 ## 📁 Project Management
 
-### Project Overview Page
-Every time you click a project, you land on a beautiful **overview page** before diving in:
-- Large project title with gradient text
-- Genre badge
-- Project description
-- **Live stats grid** — total word count across all chapters and scenes, chapter count, character count, scene count, lore entry count
-- Last edited and created timestamps shown in relative time — "2h ago", "3d ago"
-- Quick action buttons — Start Writing, Characters, Scenes, Lore, Character Web, Export PDF, Export DOCX
-- Creative-only buttons automatically hidden for non-creative genres
-- Animated background orbs for atmosphere
+### Project Overview
+
+Every project opens into an overview page with:
+
+- Title, genre, and description
+- Total words across chapters and scenes
+- Chapter, character, scene, and lore counts
+- Created and last-edited timestamps
+- Quick actions for writing, worldbuilding, and export
 
 ### Chapter Reordering
-- Every chapter in the sidebar has a **⠿ drag handle**
-- Drag chapters up and down to reorder them
-- A blue line indicator shows where the chapter will be dropped
-- New order saves to the database instantly
-- Export respects the custom order
 
-### Project Creation
-- Title + genre + optional description
-- Genre picker shows a note when a creative genre is selected: *"✦ This genre unlocks Characters, Scenes and Lore tabs"*
-- Creating a project instantly creates a matching folder on Google Drive in the background
+- Drag chapters by handle
+- Reorder them instantly
+- Export follows the saved chapter order
 
 ---
 
 ## 👤 Characters
 
-### Character Profiles
-Each character can have:
-- **Name** (required)
-- **Role** — Main Lead, Second Lead, Love Interest, Villain, Support Role, Mentor/Guide, Comic Relief, Side Character, Other
-- **Age**
-- **Appearance** — physical description
-- **Personality** — how they think, feel, act
-- **Backstory** — their history and background
-- **Image** — upload from device (stored as base64, works offline) or paste a URL
+Each character can include:
 
-### Click to Edit
-- Click any character in the sidebar to open their profile in the edit modal — no separate edit button needed
-- Modal opens pre-filled with all existing data including image preview
-- Save Changes or Cancel — modal resets cleanly after either action
+- Name
+- Role
+- Age
+- Personality
+- Appearance
+- Backstory
+- Extra notes
+- Multiple titles or aliases
+- Image from upload or URL
 
-### Wiki Tooltip — Hover Over Names While Writing
-One of Scripvia's most powerful features. While writing in the editor:
-- Hover your mouse over any character's name in the text
-- After 400ms, a **wiki card** appears near your cursor
-- The card shows the full character image, name, role, personality, backstory and appearance
-- Move mouse off the card to dismiss it
-- Works for multi-word names — hovering any word in the name triggers it
-- Longest names take priority — "Seo In Tae" matches before "Seo"
-- Close with the × button or by moving away
+### Character extras
 
-### Image Upload
-- Upload directly from your device — converted to base64 and stored in the database
-- Works completely **offline** and for guest users — no URL needed
-- Live preview appears as soon as you upload or paste a URL
-- Remove button to clear the image
+- Click a character in the list to edit instantly
+- Crop uploaded images before saving
+- Hover character names while writing to see wiki-style info cards
+- Character aliases are included in the richer tooltip display
 
 ---
 
 ## ⚡ Scenes
 
-Quick-capture story moments without the formality of a full chapter.
+Scenes are lightweight writing units that still open in the full editor.
 
-- **Title** — the scene concept
-- **Mood tag** — ⚡ Tense, 💕 Romantic, 🌫️ Mysterious, 🔥 Action, 💧 Sad, 🌅 Hopeful, 🌑 Dark, 😄 Comedic
-- Scenes open in the **same full editor** as chapters — write them out completely
-- Appear in the VS Code tabs bar just like chapters (with ⚡ icon)
-- Mood shown as a badge next to the scene title in the sidebar
-- Scenes count toward the project total word count on the overview page
+- Title
+- Mood tag
+- Optional connected chapter
+- Full rich-text content
+- Search support
+- Included in total project word counts
 
 ---
 
 ## 📖 Lore
 
-Build the bible of your fictional world.
+Lore entries help build your world beyond the manuscript.
 
-### Categories
-- ⚔️ Item / Object
-- 🗺️ Place / Location
-- 🏛️ Organization / Faction
-- ✨ Concept / Magic / Power
-- 🐉 Creature / Species
-- 📅 Historical Event
-- 📌 Other
+Each lore item can include:
 
-### Lore Entries
-Each entry has a name, category, description, optional image (upload or URL), and extra notes.
+- Name
+- Category
+- Custom category support
+- Description
+- Extra notes
+- Image
+- Timeline date
+- Timeline order
+- Map X/Y placement
 
-### Click to Edit
-Same as characters — click any lore entry to open it pre-filled for editing.
+### Lore views
 
-### Wiki Tooltip
-Lore entries appear in the wiki tooltip system too. Hover over any lore name while writing to see its description and image instantly — right where you need it, without breaking your flow.
+- 📖 Lore list for quick browsing
+- 🔗 Lore Web for visual relationships
+- 🗓️ Lore Timeline for dated entries and events
+- 🗺️ Lore Map for placing locations spatially
+
+### Lore extras
+
+- Click entries to edit them directly
+- Hover lore names in the editor to view instant wiki cards
 
 ---
 
-## 🕸️ Character Relationship Web
+## 🕸️ Relationship Tools
 
-An interactive visual canvas showing how your characters connect.
+### Character Web
 
-### Adding Relationships
-Choose two characters and a relationship type:
-- 🤝 Allies, ⚔️ Rivals, 💕 Lovers, 🖤 Enemies, 👨‍👩‍👧 Family, 🧭 Mentor/Student, 😊 Friends, 🌀 Complicated, 👥 Strangers
-- Pick a **colour** for the connection line — 6 colour options
-- Add an optional description
+Build a relationship graph between characters with:
 
-### The Canvas
-- Characters appear as **circular nodes** — showing their image if set, or a gradient initial if not
-- Name and role shown below each node in a pill label
-- Connection lines drawn between related characters with the chosen colour
-- **Relationship emoji** shown at the midpoint of each line in a labelled badge
+- Relationship type
+- Custom labels
+- Connection color
+- Optional description
 
-### Interactions
-- **Drag characters** to arrange the web however makes sense for your story
-- **Scroll to zoom in/out** — smooth zoom toward your cursor position
-- **Drag the background** to pan around the canvas — infinite canvas like Eraser.io
-- **+ / ⊙ / −** zoom control buttons at the bottom
-- **Click any connection line** to open an edit modal — change type, description, colour or delete
-- Multiple connections between the same pair shown as **curved lines** that separate so both are always visible
-- Canvas is HiDPI/retina aware — perfectly sharp on high resolution displays
+The canvas supports:
+
+- Dragging nodes
+- Zooming
+- Panning
+- Clicking connections to edit them
+- Multiple visible links between the same pair
+
+### Lore Web
+
+Worldbuilding entries can also be connected in their own visual graph.
+
+- Add lore-to-lore relationships
+- Edit relationship labels and colors
+- Double-click lore nodes to connect them faster
+- Explore your world structure visually
 
 ---
 
 ## 🔍 Search
 
-Full-text search across your entire project.
+Project-wide search works across:
 
-- Press **`Ctrl+K`** or click **🔍 Search** in the header
-- Searches simultaneously across all chapter content, scene content, character profiles and lore entries
-- Results grouped by type — 📄 Chapters, ⚡ Scenes, 👤 Characters, 📖 Lore
-- **Highlighted matches** — the search term highlighted in yellow in both titles and content snippets
-- Content snippets show surrounding context of where the match was found
-- Navigate with **↑↓ arrow keys**, open with **Enter**
-- Click any result to jump directly to it — opens the document or edit modal
-- Press **Esc** to close
+- 📄 Chapters
+- ⚡ Scenes
+- 👤 Characters
+- 📖 Lore
+
+Search includes:
+
+- Highlighted matches
+- Snippet previews
+- Grouped result types
+- Keyboard navigation with arrows and Enter
 
 ---
 
 ## 📝 Notes Panel
 
-A slide-in notepad that stays alongside your writing.
+Each project has its own slide-out notes area.
 
-- Click **📝 Notes** in the editor header to open
-- Panel slides in from the right — the editor adjusts to make room
-- One set of notes **per project** — persists between sessions
-- **Auto-saves 1.5 seconds** after you stop typing
-- Save status indicator shown in the footer
-- Notes sync to Google Drive as `_notes.txt` in the project folder
-- Closes automatically when entering focus mode
+- Opens beside the editor
+- Autosaves shortly after typing stops
+- Persists per project
+- Closes automatically in focus mode
 
 ---
 
 ## ☁️ Google Drive Sync
 
-Your writing lives in two places — on your device and in the cloud.
+Scripvia works locally first, but can also sync to Google Drive when Google sign-in is configured.
 
-### Drive Structure
-```
-Scripvia/
-└── [Project Name]/
-    ├── Chapter One.txt
-    ├── Chapter Two.txt
-    ├── _notes.txt
-    ├── Characters/
-    │   └── Character Name.txt
-    ├── Scenes/
-    │   └── Scene Title.txt
-    └── Lore/
-        └── Lore Entry.txt
-```
+### Sync coverage
 
-### Sync Behaviour
-- Chapters sync on every **Save & Sync** — background, non-blocking
-- Characters, Scenes and Lore sync to Drive when created
-- Notes sync 1.5 seconds after you stop typing
-- **Offline mode** — everything saves locally, syncs automatically when you reconnect
-- Deleting a project deletes its Drive folder
-- Deleting a chapter deletes its Drive file
-- All Drive operations run in background threads — the UI never waits or blocks
+- Chapters
+- Scenes
+- Characters
+- Lore entries
+- Notes
+- Character relationship summaries
+- Lore relationship summaries
+
+### Sync behavior
+
+- Background, non-blocking sync
+- Guest mode stays local-only
+- Signed-in mode can create project folders on Drive
+- Guest projects can be claimed after sign-in
 
 ---
 
 ## 📤 Export
 
 ### Single Chapter Export
-- **PDF** — styled with purple headings, proper margins, title and project subtitle
-- **DOCX** — matching Word document with proper font sizes and colour styling
-- Supports H1/H2/H3 headings, blockquotes, bullet lists in both formats
+
+- PDF export
+- DOCX export
+- Preserves rich-text structure for supported formatting
 
 ### Full Project Export
-Available from the Project Overview page:
-- **Cover page** — project title, description, genre, chapter count, total word count
-- **Table of contents** — numbered list of all chapters in order
-- **All chapters** — each on its own page with chapter number and title heading
-- Respects custom chapter order from drag-and-drop reordering
-- Available as both **PDF** and **DOCX**
 
----
-
-## 🖥️ Desktop App
-
-Scripvia runs as a proper native desktop application.
-
-- Packaged with **PyInstaller** + **Electron**
-- Opens as a native window — no browser tabs, no address bar
-- Custom app icon in taskbar and window title bar
-- Window size: 1280×800 default, 900×600 minimum, fully resizable
-- User data stored in `C:\Users\[name]\Scripvia\` — persists between versions
-- Shareable `.exe` installer — no Python or Node.js needed to run
-- Flask backend starts automatically on launch
+- Full manuscript export as PDF
+- Full manuscript export as DOCX
+- Includes cover-style project metadata
+- Follows custom chapter order
 
 ---
 
 ## 🔐 Authentication
 
 ### Google Sign-In
-- Full OAuth 2.0 flow
-- Access to Google Drive for sync
-- Session persists for 30 days — stay logged in across restarts
+
+- OAuth login
+- Google Drive integration
+- 30-day session persistence
 
 ### Guest Mode
-- Use Scripvia without a Google account
-- Enter just your name to get started
-- All data saved locally in the browser
-- No Drive sync in guest mode
+
+- No account required
+- Local-only writing flow
+- Useful for offline drafting and quick start use
+
+---
+
+## 🖥️ Desktop App
+
+Scripvia can be used in two ways:
+
+### Browser mode
+
+Run the Flask app and open it in your browser.
+
+### Native desktop launcher
+
+The current repo includes a native launcher in [`launcher.py`](D:/aaliya/study/projects/writer_app/launcher.py), which starts Flask and opens Scripvia in a desktop window.
+
+The repo also includes Electron packaging files in [`electron/`](D:/aaliya/study/projects/writer_app/electron), but the Python launcher is the main runnable desktop entry point in this codebase.
+
+User data is stored locally in:
+
+`~/Scripvia/scripvia.db`
 
 ---
 
@@ -339,10 +325,10 @@ Scripvia runs as a proper native desktop application.
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+S` | Save & sync current document |
-| `F11` | Toggle focus mode |
+| `Ctrl+S` | Save current document |
 | `Ctrl+K` | Open search |
-| `Esc` | Exit focus mode / close modals / hide wiki tooltip |
+| `F11` | Toggle focus mode |
+| `Esc` | Exit focus mode or close overlays |
 
 ---
 
@@ -351,87 +337,105 @@ Scripvia runs as a proper native desktop application.
 | Layer | Technology |
 |-------|-----------|
 | Frontend | HTML, CSS, Vanilla JavaScript |
-| Editor | Quill.js 1.3.7 |
+| Editor | Quill |
 | Backend | Python + Flask |
 | Database | SQLite via Flask-SQLAlchemy |
 | Migrations | Flask-Migrate + Alembic |
 | Auth | Google OAuth 2.0 |
-| Cloud Sync | Google Drive API v3 |
+| Cloud Sync | Google Drive API |
 | PDF Export | ReportLab |
 | DOCX Export | python-docx |
-| HTML Parsing | BeautifulSoup4 |
-| Desktop Wrapper | Electron |
-| Packaging | PyInstaller |
-| Fonts | Cormorant Garamond + DM Sans |
+| Parsing | BeautifulSoup |
+| Desktop Launcher | pywebview |
+| Packaging Assets | PyInstaller + Electron files |
 
 ---
 
 ## ⚙️ Local Setup
 
-### Prerequisites
-- Python 3.10+
-- Google Cloud project with Drive API + OAuth 2.0 enabled
-
-### Run Locally
+### 1. Install dependencies
 
 ```bash
-git clone https://github.com/your-username/scripvia.git
-cd scripvia
 pip install -r requirements.txt
+```
+
+### 2. Create a `.env` file
+
+Google credentials are only needed for Google login and Drive sync. Guest mode works without them.
+
+```env
+SECRET_KEY=your-secret-key
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+```
+
+### 3. Run in browser
+
+```bash
 python app.py
 ```
 
-Create a `.env` file:
-```
-SECRET_KEY=your-secret-key
-GOOGLE_CLIENT_ID=your-client-id
-GOOGLE_CLIENT_SECRET=your-client-secret
+Then open `http://127.0.0.1:5000`
+
+### 4. Run as desktop app
+
+```bash
+python launcher.py
 ```
 
-Open `http://localhost:5000`
+If `launcher.py` complains that `webview` is missing, install `pywebview` in your environment first.
 
 ---
 
 ## 📂 Project Structure
 
-```
-scripvia/
-├── app.py                  # Flask backend, all routes and models
-├── config.py               # Environment config
-├── launcher.py             # Desktop app entry point
-├── scripvia.spec           # PyInstaller build config
+```text
+writer_app/
+├── app.py
+├── launcher.py
+├── config.py
 ├── requirements.txt
 ├── templates/
-│   ├── index.html          # Main app UI
-│   └── login.html          # Login / guest page
+│   ├── index.html
+│   └── login.html
 ├── static/
 │   ├── css/
-│   │   ├── style.css       # Main styles (dark + light theme)
-│   │   └── login.css       # Login page styles
 │   └── js/
-│       ├── main.js         # All frontend logic
-│       └── login.js        # Login page logic
-├── migrations/             # Alembic migration files
-└── instance/               # SQLite database (gitignored)
+├── migrations/
+├── electron/
+└── instance/
 ```
+
+### Main files
+
+- [`app.py`](D:/aaliya/study/projects/writer_app/app.py): backend routes, models, sync, and export logic
+- [`launcher.py`](D:/aaliya/study/projects/writer_app/launcher.py): native desktop launcher
+- [`config.py`](D:/aaliya/study/projects/writer_app/config.py): environment configuration
+- [`templates/index.html`](D:/aaliya/study/projects/writer_app/templates/index.html): main UI structure
+- [`static/js/main.js`](D:/aaliya/study/projects/writer_app/static/js/main.js): frontend behavior
+- [`static/css/style.css`](D:/aaliya/study/projects/writer_app/static/css/style.css): application styling
 
 ---
 
-## 🗺️ Roadmap
+## 🆕 Updated In This Version
 
-- [ ] Electron installer with auto-updater
-- [ ] Mobile PWA support
-- [ ] Timeline / plot board — Act 1 / Act 2 / Act 3 kanban
-- [ ] Writing goals — daily word count targets with progress bar
-- [ ] Version history — see previous saves of any document
-- [ ] Collaboration — share projects with other writers
+This README now reflects the newer features already present in the app, including:
+
+- Lore relationships
+- Lore Web, Timeline, and Map views
+- Character titles / aliases
+- Image crop flow
+- Connected chapter support for scenes
+- Theme toggle and collapsible sidebar
+- Guest project claim flow after sign-in
+- More accurate desktop launcher documentation
 
 ---
 
 ## 📄 License
 
-Personal use. Built with 🖤 for writers who take their craft seriously.
+Personal project / private-use app unless you choose to apply a different license.
 
 ---
 
-*Scripvia — because your stories deserve a home as rich as the worlds you build.*
+*Scripvia — because stories deserve a workspace as rich as the worlds behind them.*
