@@ -14,6 +14,7 @@ from docx import Document as DocxDocument
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from bs4 import BeautifulSoup
+import json
 import sys
 if sys.stdout is not None:
     sys.stdout.reconfigure(encoding='utf-8')
@@ -35,6 +36,35 @@ USER_DATA_DIR = os.path.join(os.path.expanduser('~'), 'Scripvia')
 os.makedirs(USER_DATA_DIR, exist_ok=True)
 app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(USER_DATA_DIR, 'scripvia.db')}"
 app.permanent_session_lifetime = timedelta(days=30)
+
+SESSION_FILE = os.path.join(USER_DATA_DIR, 'session.json')
+
+def save_persistent_session(user_id=None, is_guest=False, guest_session_id=None):
+    try:
+        with open(SESSION_FILE, 'w') as f:
+            json.dump({
+                'user_id': user_id,
+                'is_guest': is_guest,
+                'guest_session_id': guest_session_id
+            }, f)
+    except Exception as e:
+        print(f"Session save error: {e}")
+
+def load_persistent_session():
+    try:
+        if os.path.exists(SESSION_FILE):
+            with open(SESSION_FILE, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return None
+
+def clear_persistent_session():
+    try:
+        if os.path.exists(SESSION_FILE):
+            os.remove(SESSION_FILE)
+    except Exception:
+        pass
 
 db = SQLAlchemy(app)
 from flask_migrate import Migrate
@@ -68,6 +98,7 @@ class Project(db.Model):
     title           = db.Column(db.String(200), nullable=False)
     description     = db.Column(db.Text, default='')
     genre           = db.Column(db.String(100), default='general')
+    map_image_url   = db.Column(db.Text, default='')
     user_id         = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     guest_session_id = db.Column(db.String(200), default='')
     drive_folder_id = db.Column(db.String(200), default='')
@@ -84,6 +115,7 @@ class Project(db.Model):
     def to_dict(self):
         return {
             'id': self.id, 'title': self.title, 'description': self.description,
+            'map_image_url': self.map_image_url or '',
             'genre': self.genre, 'is_creative': self.genre in CREATIVE_GENRES,
             'created_at': self.created_at.isoformat(), 'updated_at': self.updated_at.isoformat(),
             'document_count': len(self.documents)
@@ -107,7 +139,6 @@ class Document(db.Model):
             'created_at': self.created_at.isoformat(), 'updated_at': self.updated_at.isoformat()
         }
 
-
 class Character(db.Model):
     id          = db.Column(db.Integer, primary_key=True)
     project_id  = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
@@ -123,6 +154,8 @@ class Character(db.Model):
     extra_notes  = db.Column(db.Text, default='')
     drive_file_id = db.Column(db.String(200), default='')
     drive_image_file_id = db.Column(db.String(200), default='')
+    web_x       = db.Column(db.Float, nullable=True)
+    web_y       = db.Column(db.Float, nullable=True)
     created_at  = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
@@ -132,6 +165,7 @@ class Character(db.Model):
             'backstory': self.backstory, 'appearance': self.appearance, 'titles': self.get_titles(),
             'image_url': self.image_url, 'image_focus': self.image_focus, 'extra_notes': self.extra_notes,
             'drive_file_id': self.drive_file_id, 'drive_image_file_id': self.drive_image_file_id,
+            'web_x': self.web_x, 'web_y': self.web_y,
             'created_at': self.created_at.isoformat()
         }
 
@@ -174,11 +208,15 @@ class LoreItem(db.Model):
     name        = db.Column(db.String(200), nullable=False)
     category    = db.Column(db.String(100), default='item')
     description = db.Column(db.Text, default='')
+    aliases     = db.Column(db.Text, default='[]')
     image_url   = db.Column(db.String(500), default='')
     image_focus = db.Column(db.String(20), default='center')
     extra_notes = db.Column(db.Text, default='')
     event_date  = db.Column(db.String(120), default='')
     event_order = db.Column(db.Integer, default=0)
+    show_in_web = db.Column(db.Boolean, default=True)
+    web_x       = db.Column(db.Float, nullable=True)
+    web_y       = db.Column(db.Float, nullable=True)
     map_x       = db.Column(db.Float, default=50.0)
     map_y       = db.Column(db.Float, default=50.0)
     drive_file_id = db.Column(db.String(200), default='')
@@ -188,13 +226,25 @@ class LoreItem(db.Model):
     def to_dict(self):
         return {
             'id': self.id, 'project_id': self.project_id, 'name': self.name,
-            'category': self.category, 'description': self.description,
+            'category': self.category, 'description': self.description, 'aliases': self.get_aliases(),
             'image_url': self.image_url, 'image_focus': self.image_focus, 'extra_notes': self.extra_notes,
-            'event_date': self.event_date, 'event_order': self.event_order,
+            'event_date': self.event_date, 'event_order': self.event_order, 'show_in_web': bool(self.show_in_web),
+            'web_x': self.web_x, 'web_y': self.web_y,
             'map_x': self.map_x, 'map_y': self.map_y,
             'drive_file_id': self.drive_file_id, 'drive_image_file_id': self.drive_image_file_id,
             'created_at': self.created_at.isoformat()
         }
+
+    def get_aliases(self):
+        try:
+            parsed = json.loads(self.aliases or '[]')
+            return [str(alias).strip() for alias in parsed if str(alias).strip()]
+        except Exception:
+            return []
+
+    def set_aliases(self, aliases):
+        clean_aliases = [str(alias).strip() for alias in (aliases or []) if str(alias).strip()]
+        self.aliases = json.dumps(clean_aliases)
 
 
 class Note(db.Model):
@@ -258,13 +308,22 @@ class LoreRelationship(db.Model):
 
 def get_current_user():
     user_id = session.get('user_id')
+    if not user_id:
+        saved = load_persistent_session()
+        if saved and saved.get('user_id'):
+            session['user_id'] = saved['user_id']
+            session.permanent = True
+            user_id = saved['user_id']
     return User.query.get(user_id) if user_id else None
-
 
 def get_guest_session_id():
     guest_session_id = session.get('guest_session_id')
     if not guest_session_id:
-        guest_session_id = secrets.token_urlsafe(24)
+        saved = load_persistent_session()
+        if saved and saved.get('is_guest') and saved.get('guest_session_id'):
+            guest_session_id = saved['guest_session_id']
+        else:
+            guest_session_id = secrets.token_urlsafe(24)
         session['guest_session_id'] = guest_session_id
         session.permanent = True
     return guest_session_id
@@ -567,9 +626,31 @@ def build_document_drive_content(doc):
     return f"{doc.title}\n{'=' * len(doc.title)}\n\n{html_to_plain_text(doc.content or '')}"
 
 
+def append_drive_metadata(content, payload):
+    return (
+        f"{content.rstrip()}\n\n"
+        f"--- SCRIPVIA JSON ---\n"
+        f"{json.dumps(payload, ensure_ascii=False)}\n"
+        f"--- END SCRIPVIA JSON ---"
+    )
+
+
+def extract_drive_metadata(content):
+    marker = "\n--- SCRIPVIA JSON ---\n"
+    end_marker = "\n--- END SCRIPVIA JSON ---"
+    if marker not in content or end_marker not in content:
+        return content, {}
+    prefix, suffix = content.split(marker, 1)
+    json_blob, _ = suffix.split(end_marker, 1)
+    try:
+        return prefix.rstrip(), json.loads(json_blob.strip())
+    except Exception:
+        return content, {}
+
+
 def build_character_drive_content(char):
     titles = ', '.join(char.get_titles()) or 'None'
-    return (
+    body = (
         f"Name: {char.name}\n"
         f"Titles: {titles}\n"
         f"Role: {char.role or 'None'}\n"
@@ -579,6 +660,21 @@ def build_character_drive_content(char):
         f"Backstory:\n{char.backstory or ''}\n\n"
         f"Notes:\n{char.extra_notes or ''}"
     )
+    return append_drive_metadata(body, {
+        'type': 'character',
+        'name': char.name,
+        'role': char.role,
+        'age': char.age,
+        'appearance': char.appearance,
+        'personality': char.personality,
+        'backstory': char.backstory,
+        'extra_notes': char.extra_notes,
+        'titles': char.get_titles(),
+        'image_url': char.image_url or '',
+        'image_focus': char.image_focus or 'center',
+        'web_x': char.web_x,
+        'web_y': char.web_y
+    })
 
 
 def build_scene_drive_content(scene):
@@ -591,7 +687,7 @@ def build_scene_drive_content(scene):
 
 
 def build_lore_drive_content(item):
-    return (
+    body = (
         f"Name: {item.name}\n"
         f"Category: {item.category or 'item'}\n\n"
         f"Description:\n{item.description or ''}\n\n"
@@ -600,6 +696,23 @@ def build_lore_drive_content(item):
         f"Map Position: ({item.map_x:.1f}, {item.map_y:.1f})\n\n"
         f"Notes:\n{item.extra_notes or ''}"
     )
+    return append_drive_metadata(body, {
+        'type': 'lore',
+        'name': item.name,
+        'category': item.category,
+        'description': item.description,
+        'aliases': item.get_aliases(),
+        'image_url': item.image_url or '',
+        'image_focus': item.image_focus or 'center',
+        'extra_notes': item.extra_notes,
+        'event_date': item.event_date or '',
+        'event_order': item.event_order or 0,
+        'show_in_web': bool(item.show_in_web),
+        'web_x': item.web_x,
+        'web_y': item.web_y,
+        'map_x': item.map_x,
+        'map_y': item.map_y
+    })
 
 
 def build_relationships_drive_content(project_id):
@@ -695,6 +808,248 @@ def sync_full_project_to_drive(user, project):
     db.session.commit()
 
 
+def list_drive_children(drive, parent_id, mime_type=None):
+    query = f"'{parent_id}' in parents and trashed=false"
+    if mime_type:
+        query += f" and mimeType='{mime_type}'"
+    page_token = None
+    items = []
+    while True:
+        response = drive.files().list(
+            q=query,
+            fields='nextPageToken, files(id, name, mimeType)',
+            pageSize=200,
+            pageToken=page_token,
+            orderBy='name'
+        ).execute()
+        items.extend(response.get('files', []))
+        page_token = response.get('nextPageToken')
+        if not page_token:
+            break
+    return items
+
+
+def download_drive_file_text(drive, file_id):
+    payload = drive.files().get_media(fileId=file_id).execute()
+    if isinstance(payload, bytes):
+        return payload.decode('utf-8', errors='replace')
+    return str(payload or '')
+
+
+def download_drive_file_as_data_url(drive, file_id, fallback_name='image.png'):
+    meta = drive.files().get(fileId=file_id, fields='name, mimeType').execute()
+    raw = drive.files().get_media(fileId=file_id).execute()
+    mime = meta.get('mimeType') or 'image/png'
+    encoded = base64.b64encode(raw).decode('ascii')
+    return f"data:{mime};base64,{encoded}"
+
+
+def extract_named_section(content, heading):
+    pattern = rf"{re.escape(heading)}:\n(.*?)(?:\n[A-Z][A-Za-z ]+:\n|\Z)"
+    match = re.search(pattern, content, flags=re.S)
+    return match.group(1).strip() if match else ''
+
+
+def parse_legacy_character_content(name, content):
+    lines = [line.rstrip() for line in content.splitlines()]
+    title_line = next((line for line in lines if line.startswith('Titles:')), '')
+    role_line = next((line for line in lines if line.startswith('Role:')), '')
+    age_line = next((line for line in lines if line.startswith('Age:')), '')
+    titles = [part.strip() for part in title_line.replace('Titles:', '', 1).split(',') if part.strip() and part.strip().lower() != 'none']
+    return {
+        'name': name,
+        'titles': titles,
+        'role': role_line.replace('Role:', '', 1).strip().replace('None', ''),
+        'age': age_line.replace('Age:', '', 1).strip().replace('Unknown', ''),
+        'appearance': extract_named_section(content, 'Appearance'),
+        'personality': extract_named_section(content, 'Personality'),
+        'backstory': extract_named_section(content, 'Backstory'),
+        'extra_notes': extract_named_section(content, 'Notes'),
+        'image_url': '',
+        'image_focus': 'center'
+    }
+
+
+def parse_legacy_lore_content(name, content):
+    lines = [line.rstrip() for line in content.splitlines()]
+    category_line = next((line for line in lines if line.startswith('Category:')), '')
+    date_line = next((line for line in lines if line.startswith('Timeline Date:')), '')
+    order_line = next((line for line in lines if line.startswith('Timeline Order:')), '')
+    map_line = next((line for line in lines if line.startswith('Map Position:')), '')
+    coords = re.search(r'\(([-\d.]+),\s*([-\d.]+)\)', map_line or '')
+    return {
+        'name': name,
+        'category': category_line.replace('Category:', '', 1).strip() or 'item',
+        'description': extract_named_section(content, 'Description'),
+        'aliases': [],
+        'image_url': '',
+        'image_focus': 'center',
+        'extra_notes': extract_named_section(content, 'Notes'),
+        'event_date': date_line.replace('Timeline Date:', '', 1).strip().replace('None', ''),
+        'event_order': int((order_line.replace('Timeline Order:', '', 1).strip() or '0')),
+        'show_in_web': True,
+        'web_x': None,
+        'web_y': None,
+        'map_x': float(coords.group(1)) if coords else 50.0,
+        'map_y': float(coords.group(2)) if coords else 50.0
+    }
+
+
+def plain_text_to_html(text):
+    paragraphs = [segment.strip() for segment in re.split(r'\n{2,}', text.strip()) if segment.strip()]
+    if not paragraphs:
+        return ''
+    return ''.join(f"<p>{segment.replace(chr(10), '<br>')}</p>" for segment in paragraphs)
+
+
+def import_drive_project(drive, user, folder_meta):
+    project = Project.query.filter_by(user_id=user.id, drive_folder_id=folder_meta['id']).first()
+    if not project:
+        project = Project(
+            title=folder_meta['name'],
+            description='Imported from Google Drive',
+            genre='fantasy',
+            user_id=user.id,
+            guest_session_id='',
+            drive_folder_id=folder_meta['id']
+        )
+        db.session.add(project)
+        db.session.commit()
+
+    child_folders = {item['name'].lower(): item for item in list_drive_children(drive, folder_meta['id'], 'application/vnd.google-apps.folder')}
+    is_creative_project = any(key in child_folders for key in ['characters', 'scenes', 'lore'])
+    target_genre = project.genre if project.genre and project.genre != 'general' else ('fantasy' if is_creative_project else 'general')
+    if project.genre != target_genre:
+        project.genre = target_genre
+        db.session.commit()
+
+    chapters_folder = child_folders.get('chapters')
+    if chapters_folder:
+        for file_meta in list_drive_children(drive, chapters_folder['id']):
+            if file_meta.get('mimeType') == 'application/vnd.google-apps.folder' or not file_meta['name'].lower().endswith('.txt'):
+                continue
+            existing = Document.query.filter_by(project_id=project.id, drive_file_id=file_meta['id']).first()
+            if existing:
+                continue
+            raw = download_drive_file_text(drive, file_meta['id'])
+            title = re.sub(r'\.txt$', '', file_meta['name'], flags=re.I)
+            content_text = raw
+            if '\n\n' in raw:
+                _, content_text = raw.split('\n\n', 1)
+            doc = Document(
+                title=title,
+                content=plain_text_to_html(content_text),
+                project_id=project.id,
+                drive_file_id=file_meta['id'],
+                order_index=Document.query.filter_by(project_id=project.id).count()
+            )
+            db.session.add(doc)
+
+    characters_folder = child_folders.get('characters')
+    if characters_folder:
+        image_files = {item['name'].rsplit(' image', 1)[0].strip().lower(): item for item in list_drive_children(drive, characters_folder['id']) if 'image/' in (item.get('mimeType') or '')}
+        for file_meta in list_drive_children(drive, characters_folder['id']):
+            if file_meta.get('mimeType') == 'application/vnd.google-apps.folder' or not file_meta['name'].lower().endswith('.txt'):
+                continue
+            existing = Character.query.filter_by(project_id=project.id, drive_file_id=file_meta['id']).first()
+            if existing:
+                continue
+            raw = download_drive_file_text(drive, file_meta['id'])
+            _, metadata = extract_drive_metadata(raw)
+            name = re.sub(r'\.txt$', '', file_meta['name'], flags=re.I)
+            payload = metadata if metadata.get('type') == 'character' else parse_legacy_character_content(name, raw)
+            image_meta = image_files.get((payload.get('name') or name).strip().lower())
+            image_url = payload.get('image_url') or (download_drive_file_as_data_url(drive, image_meta['id']) if image_meta else '')
+            char = Character(
+                project_id=project.id,
+                name=payload.get('name') or name,
+                role=payload.get('role', ''),
+                age=payload.get('age', ''),
+                personality=payload.get('personality', ''),
+                backstory=payload.get('backstory', ''),
+                appearance=payload.get('appearance', ''),
+                image_url=image_url,
+                image_focus=payload.get('image_focus', 'center'),
+                extra_notes=payload.get('extra_notes', ''),
+                drive_file_id=file_meta['id'],
+                drive_image_file_id=image_meta['id'] if image_meta else '',
+                web_x=payload.get('web_x'),
+                web_y=payload.get('web_y')
+            )
+            char.set_titles(payload.get('titles', []))
+            db.session.add(char)
+
+    scenes_folder = child_folders.get('scenes')
+    if scenes_folder:
+        for file_meta in list_drive_children(drive, scenes_folder['id']):
+            if file_meta.get('mimeType') == 'application/vnd.google-apps.folder' or not file_meta['name'].lower().endswith('.txt'):
+                continue
+            existing = Scene.query.filter_by(project_id=project.id, drive_file_id=file_meta['id']).first()
+            if existing:
+                continue
+            raw = download_drive_file_text(drive, file_meta['id'])
+            scene = Scene(
+                project_id=project.id,
+                title=re.sub(r'\.txt$', '', file_meta['name'], flags=re.I),
+                content=plain_text_to_html(raw.split('\n\n', 1)[1] if '\n\n' in raw else raw),
+                mood='',
+                connected_chapter='',
+                drive_file_id=file_meta['id']
+            )
+            db.session.add(scene)
+
+    lore_folder = child_folders.get('lore')
+    if lore_folder:
+        image_files = {item['name'].rsplit(' image', 1)[0].strip().lower(): item for item in list_drive_children(drive, lore_folder['id']) if 'image/' in (item.get('mimeType') or '')}
+        for file_meta in list_drive_children(drive, lore_folder['id']):
+            if file_meta.get('mimeType') == 'application/vnd.google-apps.folder' or not file_meta['name'].lower().endswith('.txt'):
+                continue
+            existing = LoreItem.query.filter_by(project_id=project.id, drive_file_id=file_meta['id']).first()
+            if existing:
+                continue
+            raw = download_drive_file_text(drive, file_meta['id'])
+            _, metadata = extract_drive_metadata(raw)
+            name = re.sub(r'\.txt$', '', file_meta['name'], flags=re.I)
+            payload = metadata if metadata.get('type') == 'lore' else parse_legacy_lore_content(name, raw)
+            image_meta = image_files.get((payload.get('name') or name).strip().lower())
+            image_url = payload.get('image_url') or (download_drive_file_as_data_url(drive, image_meta['id']) if image_meta else '')
+            lore = LoreItem(
+                project_id=project.id,
+                name=payload.get('name') or name,
+                category=payload.get('category', 'item'),
+                description=payload.get('description', ''),
+                image_url=image_url,
+                image_focus=payload.get('image_focus', 'center'),
+                extra_notes=payload.get('extra_notes', ''),
+                event_date=payload.get('event_date', ''),
+                event_order=int(payload.get('event_order') or 0),
+                show_in_web=payload.get('show_in_web', True),
+                web_x=payload.get('web_x'),
+                web_y=payload.get('web_y'),
+                map_x=float(payload.get('map_x') or 50),
+                map_y=float(payload.get('map_y') or 50),
+                drive_file_id=file_meta['id'],
+                drive_image_file_id=image_meta['id'] if image_meta else ''
+            )
+            lore.set_aliases(payload.get('aliases', []))
+            db.session.add(lore)
+
+    db.session.commit()
+    return project
+
+
+def import_projects_from_drive(user):
+    if not user or not user.access_token:
+        return
+    drive = get_drive_service(user)
+    root_folder_id = setup_scripvia_folder(user)
+    if not root_folder_id:
+        return
+    project_folders = list_drive_children(drive, root_folder_id, 'application/vnd.google-apps.folder')
+    for folder in project_folders:
+        import_drive_project(drive, user, folder)
+
+
 def drive_bg(fn, *args):
     """Run a Drive operation in a background thread."""
     t = threading.Thread(target=fn, args=args)
@@ -706,6 +1061,19 @@ def drive_bg(fn, *args):
 
 @app.route('/')
 def index():
+    # Try to restore session from file if flask session is empty
+    if not session.get('user_id') and not session.get('guest_session_id'):
+        saved = load_persistent_session()
+        if saved:
+            if saved.get('user_id'):
+                session['user_id'] = saved['user_id']
+                session.permanent = True
+            elif saved.get('is_guest') and saved.get('guest_session_id'):
+                session['guest_session_id'] = saved['guest_session_id']
+                session.permanent = True
+        else:
+            # Nothing saved at all → show login
+            return redirect('/login')
     return render_template('index.html')
 
 @app.route('/login')
@@ -762,7 +1130,9 @@ def auth_callback():
         if guest_projects:
             db.session.commit()
     session['user_id'] = user.id
+    save_persistent_session(user_id=user.id)
     session.permanent  = True
+    save_persistent_session(user.id)
     setup_scripvia_folder(user)
     return redirect('/?logged_in=true')
 
@@ -770,6 +1140,7 @@ def auth_callback():
 @app.route('/auth/logout')
 def auth_logout():
     session.clear()
+    clear_persistent_session()
     return redirect('/login')
 
 
@@ -780,6 +1151,15 @@ def auth_me():
         return jsonify({'logged_in': True, 'user': user.to_dict(), 'scope_key': f"user_{user.id}"})
     return jsonify({'logged_in': False, 'scope_key': f"guest_{get_guest_session_id()}"})
 
+@app.route('/auth/guest', methods=['POST'])
+def auth_guest():
+    data = request.get_json()
+    name = (data or {}).get('name', 'Guest').strip() or 'Guest'
+    gid  = get_guest_session_id()  # creates or restores guest session
+    session['guest_name'] = name
+    session.permanent = True
+    save_persistent_session(is_guest=True, guest_session_id=gid)
+    return jsonify({'ok': True})
 
 # --- PROJECTS ---
 
@@ -787,6 +1167,19 @@ def auth_me():
 def get_projects():
     user = get_current_user()
     if user:
+        should_attempt_import = (
+            bool(user.access_token) and (
+                session.get('drive_import_checked_user_id') != user.id or
+                Project.query.filter_by(user_id=user.id).count() == 0
+            )
+        )
+        if should_attempt_import:
+            try:
+                import_projects_from_drive(user)
+                session['drive_import_checked_user_id'] = user.id
+                session.permanent = True
+            except Exception as e:
+                print(f"Drive import error: {e}")
         projects = Project.query.filter(
             (Project.user_id == user.id) | legacy_project_filter()
         ).order_by(Project.updated_at.desc()).all()
@@ -824,6 +1217,7 @@ def create_project():
         title=data['title'],
         description=data.get('description', ''),
         genre=data.get('genre', 'general'),
+        map_image_url=data.get('map_image_url', ''),
         user_id=user.id if user else None,
         guest_session_id='' if user else get_guest_session_id()
     )
@@ -843,6 +1237,17 @@ def create_project():
         drive_bg(_bg, app, project.id, user.id)
 
     return jsonify(project.to_dict()), 201
+
+
+@app.route('/api/projects/<int:project_id>', methods=['PUT'])
+def update_project(project_id):
+    project = get_project_or_404(project_id)
+    data = request.get_json() or {}
+    for field in ['title', 'description', 'genre', 'map_image_url']:
+        if field in data:
+            setattr(project, field, data[field])
+    db.session.commit()
+    return jsonify(project.to_dict())
 
 
 @app.route('/api/projects/<int:project_id>', methods=['DELETE'])
@@ -981,7 +1386,8 @@ def create_character(project_id):
                      age=data.get('age', ''), personality=data.get('personality', ''),
                      backstory=data.get('backstory', ''), appearance=data.get('appearance', ''),
                      image_url=data.get('image_url', ''), image_focus=data.get('image_focus', 'center'),
-                     extra_notes=data.get('extra_notes', ''))
+                     extra_notes=data.get('extra_notes', ''),
+                     web_x=data.get('web_x'), web_y=data.get('web_y'))
     char.set_titles(data.get('titles', []))
     db.session.add(char)
     db.session.commit()
@@ -1025,7 +1431,7 @@ def update_character(char_id):
     char = Character.query.get_or_404(char_id)
     get_project_or_404(char.project_id)
     data = request.get_json()
-    for f in ['name','role','age','personality','backstory','appearance','image_url','image_focus','extra_notes']:
+    for f in ['name','role','age','personality','backstory','appearance','image_url','image_focus','extra_notes','web_x','web_y']:
         if f in data: setattr(char, f, data[f])
     if 'titles' in data:
         char.set_titles(data.get('titles', []))
@@ -1216,12 +1622,17 @@ def create_lore(project_id):
         category=data.get('category', 'item'),
         description=data.get('description', ''),
         image_url=data.get('image_url', ''),
+        image_focus=data.get('image_focus', 'center'),
         extra_notes=data.get('extra_notes', ''),
         event_date=data.get('event_date', ''),
         event_order=int(data.get('event_order') or 0),
+        show_in_web=bool(data.get('show_in_web', True)),
+        web_x=data.get('web_x'),
+        web_y=data.get('web_y'),
         map_x=float(data.get('map_x') or 50),
         map_y=float(data.get('map_y') or 50)
     )
+    item.set_aliases(data.get('aliases', []))
     db.session.add(item)
     db.session.commit()
 
@@ -1263,11 +1674,15 @@ def update_lore_item(item_id):
     item = LoreItem.query.get_or_404(item_id)
     get_project_or_404(item.project_id)
     data = request.get_json()
-    for f in ['name', 'category', 'description', 'image_url', 'extra_notes', 'event_date']:
+    for f in ['name', 'category', 'description', 'image_url', 'image_focus', 'extra_notes', 'event_date', 'web_x', 'web_y']:
         if f in data:
             setattr(item, f, data[f])
+    if 'aliases' in data:
+        item.set_aliases(data.get('aliases', []))
     if 'event_order' in data:
         item.event_order = int(data.get('event_order') or 0)
+    if 'show_in_web' in data:
+        item.show_in_web = bool(data.get('show_in_web'))
     if 'map_x' in data:
         item.map_x = float(data.get('map_x') or 0)
     if 'map_y' in data:
@@ -1652,7 +2067,7 @@ def get_wiki_data(project_id):
     lore  = LoreItem.query.filter_by(project_id=project_id).all()
     wiki  = {}
     for c in chars:
-        wiki[c.name.lower()] = {
+        entry = {
             'type': 'character', 'name': c.name, 'role': c.role, 'age': c.age,
             'titles': c.get_titles(),
             'image_url': c.image_url, 'id': c.id, 'image_focus': c.image_focus,
@@ -1660,12 +2075,19 @@ def get_wiki_data(project_id):
             'backstory':  c.backstory[:200]   + '...' if len(c.backstory)   > 200 else c.backstory,
             'appearance': c.appearance[:150]  + '...' if len(c.appearance)  > 150 else c.appearance,
         }
+        wiki[c.name.lower()] = entry
+        for alias in c.get_titles():
+            wiki[alias.lower()] = entry
     for l in lore:
-        wiki[l.name.lower()] = {
+        entry = {
             'type': 'lore', 'name': l.name, 'category': l.category,
+            'aliases': l.get_aliases(),
             'image_url': l.image_url, 'id': l.id, 'image_focus': l.image_focus,
             'summary': l.description[:150] + '...' if len(l.description) > 150 else l.description,
         }
+        wiki[l.name.lower()] = entry
+        for alias in l.get_aliases():
+            wiki[alias.lower()] = entry
     return jsonify(wiki)
 
 
@@ -1927,21 +2349,28 @@ def ensure_character_titles_column():
     with engine.begin() as conn:
         required_columns = {
             'project': {
-                'guest_session_id': "VARCHAR(200) DEFAULT ''"
+                'guest_session_id': "VARCHAR(200) DEFAULT ''",
+                'map_image_url': "TEXT DEFAULT ''"
             },
             'character': {
                 'titles': "TEXT DEFAULT '[]'",
                 'drive_file_id': "VARCHAR(200) DEFAULT ''",
-                'drive_image_file_id': "VARCHAR(200) DEFAULT ''"
+                'drive_image_file_id': "VARCHAR(200) DEFAULT ''",
+                'web_x': "FLOAT",
+                'web_y': "FLOAT"
             },
             'scene': {
                 'drive_file_id': "VARCHAR(200) DEFAULT ''"
             },
             'lore_item': {
+                'aliases': "TEXT DEFAULT '[]'",
                 'drive_file_id': "VARCHAR(200) DEFAULT ''",
                 'drive_image_file_id': "VARCHAR(200) DEFAULT ''",
                 'event_date': "VARCHAR(120) DEFAULT ''",
                 'event_order': "INTEGER DEFAULT 0",
+                'show_in_web': "BOOLEAN DEFAULT 1",
+                'web_x': "FLOAT",
+                'web_y': "FLOAT",
                 'map_x': "FLOAT DEFAULT 50",
                 'map_y': "FLOAT DEFAULT 50"
             }

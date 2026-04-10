@@ -17,6 +17,14 @@ let currentLoreItems = [];
 let storageScopeKey = 'guest_default';
 let relResizeHandler = null;
 let loreWebResizeHandler = null;
+let currentLoreWebView = 'mixed';
+let currentLoreWebViews = [];
+let currentTab = 'chapters';
+let projectListCache = [];
+const projectStatsCache = new Map();
+const documentsCache = new Map();
+const documentContentCache = new Map();
+let pendingSyncPromise = null;
 let authState = {
     loggedIn: false,
     mode: 'guest'
@@ -61,6 +69,7 @@ const loreTimelineEl = document.getElementById('loreTimeline');
 const loreMapBoard = document.getElementById('loreMapBoard');
 const loreMapLines = document.getElementById('loreMapLines');
 const loreMapList = document.getElementById('loreMapList');
+const loreWebViewSelect = document.getElementById('loreWebViewSelect');
 
 const CREATIVE_GENRES = ['fantasy', 'sci-fi', 'fiction', 'romance', 'mystery', 'thriller', 'horror', 'historical'];
 
@@ -228,6 +237,26 @@ function showConfirm(message, onConfirm, title = 'Are you sure?') {
         });
 }
 
+function getFallbackAvatarDataUrl(name = 'User') {
+    const safeName = String(name || 'User').trim();
+    const initial = escapeHtml((safeName.charAt(0) || 'U').toUpperCase());
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#7b6fb0"/><stop offset="1" stop-color="#5f8fd6"/></linearGradient></defs><rect width="64" height="64" rx="32" fill="url(#g)"/><text x="50%" y="54%" text-anchor="middle" font-family="DM Sans, Arial, sans-serif" font-size="28" fill="white">${initial}</text></svg>`;
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function setUserAvatar(name, picture) {
+    const userAvatar = document.getElementById('userAvatar');
+    if (!userAvatar) return;
+    const fallback = getFallbackAvatarDataUrl(name);
+    userAvatar.style.display = 'block';
+    userAvatar.alt = `${name || 'User'} avatar`;
+    userAvatar.onerror = () => {
+        userAvatar.onerror = null;
+        userAvatar.src = fallback;
+    };
+    userAvatar.src = picture || fallback;
+}
+
 // --- QUILL ---
 function initQuill() {
     quill = new Quill('#quillEditor', {
@@ -246,6 +275,7 @@ function initQuill() {
             ]
         }
     });
+    applyQuillToolbarTooltips();
     quill.on('text-change', function () {
         setSaveStatus('unsaved');
         saveToLocalStorage();
@@ -289,6 +319,54 @@ function readFileAsDataUrl(file) {
         reader.onload = e => resolve(e.target.result);
         reader.onerror = reject;
         reader.readAsDataURL(file);
+    });
+}
+
+function applyQuillToolbarTooltips() {
+    const toolbar = document.querySelector('.ql-toolbar');
+    if (!toolbar) return;
+    const tooltipMap = new Map([
+        ['.ql-header[value="1"]', 'Heading 1'],
+        ['.ql-header[value="2"]', 'Heading 2'],
+        ['.ql-header[value="3"]', 'Heading 3'],
+        ['.ql-header[value=""]', 'Paragraph'],
+        ['.ql-bold', 'Bold'],
+        ['.ql-italic', 'Italic'],
+        ['.ql-underline', 'Underline'],
+        ['.ql-strike', 'Strikethrough'],
+        ['.ql-color', 'Text color'],
+        ['.ql-background', 'Highlight color'],
+        ['.ql-list[value="ordered"]', 'Numbered list'],
+        ['.ql-list[value="bullet"]', 'Bullet list'],
+        ['.ql-blockquote', 'Blockquote'],
+        ['.ql-code-block', 'Code block'],
+        ['.ql-align', 'Alignment'],
+        ['.ql-indent[value="-1"]', 'Decrease indent'],
+        ['.ql-indent[value="+1"]', 'Increase indent'],
+        ['.ql-link', 'Insert link'],
+        ['.ql-image', 'Insert image'],
+        ['.ql-clean', 'Clear formatting']
+    ]);
+    tooltipMap.forEach((label, selector) => {
+        toolbar.querySelectorAll(selector).forEach(el => {
+            el.setAttribute('title', label);
+            el.setAttribute('aria-label', label);
+        });
+    });
+    toolbar.querySelectorAll('.ql-picker-label').forEach(label => {
+        if (label.closest('.ql-header')) {
+            label.setAttribute('title', 'Heading style');
+            label.setAttribute('aria-label', 'Heading style');
+        } else if (label.closest('.ql-color')) {
+            label.setAttribute('title', 'Text color');
+            label.setAttribute('aria-label', 'Text color');
+        } else if (label.closest('.ql-background')) {
+            label.setAttribute('title', 'Highlight color');
+            label.setAttribute('aria-label', 'Highlight color');
+        } else if (label.closest('.ql-align')) {
+            label.setAttribute('title', 'Alignment');
+            label.setAttribute('aria-label', 'Alignment');
+        }
     });
 }
 
@@ -371,13 +449,23 @@ async function api(method, url, body = null) {
     const opts = { method, headers: { 'Content-Type': 'application/json' } };
     if (body) opts.body = JSON.stringify(body);
     const res = await fetch(url, opts);
-    if (!res.ok) throw new Error(`API ${res.status}`);
+    if (!res.ok) {
+        let message = `API ${res.status}`;
+        try {
+            const errorBody = await res.json();
+            if (errorBody?.error) message = errorBody.error;
+        } catch (e) { }
+        throw new Error(message);
+    }
     return res.json();
 }
 
 // --- PROJECTS ---
 async function loadProjects() {
-    try { renderProjects(await api('GET', '/api/projects')); }
+    try {
+        projectListCache = await api('GET', '/api/projects');
+        renderProjects(projectListCache);
+    }
     catch (e) { console.error('loadProjects:', e); }
 }
 
@@ -423,7 +511,8 @@ async function createProject() {
         closeModal(newProjectModal);
         projectTitleInput.value = projectDescInput.value = '';
         projectGenreInput.value = 'general';
-        await loadProjects();
+        projectListCache = [...projectListCache, p];
+        renderProjects(projectListCache);
         selectProject(p.id);
     } catch (e) { console.error('createProject:', e); }
     finally { btn.textContent = 'Create Project'; btn.disabled = false; }
@@ -435,7 +524,10 @@ async function deleteProject(event, id) {
         try {
             await api('DELETE', `/api/projects/${id}`);
             if (currentProjectId === id) { currentProjectId = currentProjectData = null; showProjectList(); hideEditor(); }
-            await loadProjects();
+            projectListCache = projectListCache.filter(project => project.id !== id);
+            projectStatsCache.delete(id);
+            documentsCache.delete(id);
+            renderProjects(projectListCache);
         } catch (e) { console.error('deleteProject:', e); }
     }, 'Delete Project?');
 }
@@ -443,8 +535,13 @@ async function deleteProject(event, id) {
 async function selectProject(id) {
     try {
         currentProjectId = id;
-        const projects = await api('GET', '/api/projects');
-        currentProjectData = projects.find(p => p.id === id);
+        currentProjectData = projectListCache.find(p => p.id === id);
+        if (!currentProjectData) {
+            await loadProjects();
+            currentProjectData = projectListCache.find(p => p.id === id);
+        }
+        if (!currentProjectData) return;
+        renderProjects(projectListCache);
         showProjectDetail();
         currentProjectName.textContent = currentProjectData.title;
         await showProjectOverview(id);
@@ -452,7 +549,6 @@ async function selectProject(id) {
         ['tabCharacters', 'tabScenes', 'tabLore', 'tabRelationships'].forEach(tid =>
             document.getElementById(tid).classList.toggle('hidden', !isCreative));
         switchTab('chapters');
-        await loadDocuments(id);
         if (isCreative) await loadWikiData(id);
         closeNotesPanel();
     } catch (e) { console.error('selectProject:', e); }
@@ -464,7 +560,11 @@ function showProjectDetail() { projectsSection.style.display = 'none'; projectDe
 // --- PROJECT OVERVIEW ---
 async function showProjectOverview(projectId) {
     try {
-        const stats = await api('GET', `/api/projects/${projectId}/stats`);
+        let stats = projectStatsCache.get(projectId);
+        if (!stats) {
+            stats = await api('GET', `/api/projects/${projectId}/stats`);
+            projectStatsCache.set(projectId, stats);
+        }
         const genreEmojis = {
             fantasy: '\u2694\uFE0F Fantasy',
             'sci-fi': '\u{1F680} Sci-Fi',
@@ -545,9 +645,13 @@ function formatDateNice(dateInput) {
 
 // --- TABS ---
 function switchTab(tabName) {
+    currentTab = tabName;
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tabName));
     document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.id === `tab-${tabName}`));
-    if (tabName === 'chapters') loadDocuments(currentProjectId);
+    if (tabName === 'chapters') {
+        if (documentsCache.has(currentProjectId)) renderCachedDocuments(currentProjectId);
+        else loadDocuments(currentProjectId);
+    }
     if (tabName === 'characters') loadCharacters(currentProjectId);
     if (tabName === 'scenes') loadScenes(currentProjectId);
     if (tabName === 'lore') loadLore(currentProjectId);
@@ -564,8 +668,17 @@ document.getElementById('backToProjects').addEventListener('click', () => {
 
 // --- DOCUMENTS ---
 async function loadDocuments(projectId) {
-    try { renderDocuments(await api('GET', `/api/projects/${projectId}/documents`)); }
+    try {
+        const docs = await api('GET', `/api/projects/${projectId}/documents`);
+        documentsCache.set(projectId, docs);
+        renderDocuments(docs);
+    }
     catch (e) { console.error('loadDocuments:', e); }
+}
+
+function renderCachedDocuments(projectId = currentProjectId) {
+    const docs = documentsCache.get(projectId);
+    if (docs) renderDocuments(docs);
 }
 
 function renderDocuments(docs) {
@@ -638,15 +751,27 @@ async function createDocument() {
         const doc = await api('POST', `/api/projects/${currentProjectId}/documents`, { title });
         closeModal(newDocModal);
         docTitleModalInput.value = '';
-        if (currentProjectId) await loadDocuments(currentProjectId);
+        projectStatsCache.delete(currentProjectId);
+        const docs = documentsCache.get(currentProjectId) || [];
+        documentsCache.set(currentProjectId, [...docs, doc]);
+        renderCachedDocuments();
+        documentContentCache.set(`chapter_${doc.id}`, doc);
         openDocument(doc.id);
-    } catch (e) { console.error('createDocument:', e); }
+    } catch (e) {
+        console.error('createDocument:', e);
+        await showNotice(e.message || 'Could not create the chapter right now. Please try again.', 'Chapter Creation Failed', 'danger');
+    }
     finally { btn.textContent = 'Create'; btn.disabled = false; }
 }
 
 async function openDocument(id, type = 'chapter') {
     try {
-        const doc = await api('GET', type === 'scene' ? `/api/scenes/${id}` : `/api/documents/${id}`);
+        const cacheKey = `${type}_${id}`;
+        let doc = type === 'chapter' ? documentContentCache.get(cacheKey) : null;
+        if (!doc) {
+            doc = await api('GET', type === 'scene' ? `/api/scenes/${id}` : `/api/documents/${id}`);
+            if (type === 'chapter') documentContentCache.set(cacheKey, doc);
+        }
         currentDocId = id; currentDocType = type;
         docTitleInput.value = doc.title; docTitleInput.disabled = false;
         quill.root.innerHTML = doc.content || '';
@@ -654,7 +779,7 @@ async function openDocument(id, type = 'chapter') {
         showEditor(); enableHeaderBtns(true);
         if (!await checkLocalStorageRestore(`${type}_${id}`, doc.content || '')) setSaveStatus('saved');
         updateStats(); startAutoSave(); addOpenTab(id, doc.title, type);
-        if (type === 'chapter' && currentProjectId) await loadDocuments(currentProjectId);
+        if (type === 'chapter' && currentProjectId) renderCachedDocuments(currentProjectId);
         if (type === 'scene' && currentProjectId) await loadScenes(currentProjectId);
     } catch (e) { console.error('openDocument:', e); }
 }
@@ -663,27 +788,26 @@ async function saveDocument() {
     if (!currentDocId) return;
     setSaveStatus('saving');
     try {
-        await api('PUT', currentDocType === 'scene' ? `/api/scenes/${currentDocId}` : `/api/documents/${currentDocId}`, {
-            title: docTitleInput.value.trim() || 'Untitled',
-            content: quill.root.innerHTML
+        const title = docTitleInput.value.trim() || 'Untitled';
+        const content = quill.root.innerHTML;
+        const savedDoc = await api('PUT', currentDocType === 'scene' ? `/api/scenes/${currentDocId}` : `/api/documents/${currentDocId}`, {
+            title,
+            content
         });
-        updateTabTitle(currentDocId, docTitleInput.value.trim());
+        updateTabTitle(currentDocId, title);
+        if (currentDocType === 'chapter') {
+            projectStatsCache.delete(currentProjectId);
+            documentContentCache.set(`chapter_${currentDocId}`, savedDoc);
+            const docs = documentsCache.get(currentProjectId) || [];
+            documentsCache.set(currentProjectId, docs.map(doc => doc.id === currentDocId ? { ...doc, title, updated_at: savedDoc.updated_at, content: undefined } : doc));
+            renderCachedDocuments(currentProjectId);
+        }
         clearLocalStorage(`${currentDocType}_${currentDocId}`);
         updateLastSaved();
-        if (currentDocType === 'chapter') await loadDocuments(currentProjectId);
         if (currentDocType === 'scene') await loadScenes(currentProjectId);
         if (canAttemptDriveSync() && currentDocType === 'chapter') {
             setSaveStatus('syncing');
-            try {
-                await api('POST', `/api/documents/${currentDocId}/sync`);
-                setSaveStatus('synced');
-                setTimeout(() => setSaveStatus('saved'), 2000);
-            }
-            catch (e) {
-                setSaveStatus('error');
-                console.error('driveSync:', e);
-                await showNotice('Drive sync failed. Please try again after restarting the app.', 'Sync Failed', 'danger');
-            }
+            queueDriveSync(currentDocId);
         } else {
             setSaveStatus('saved');
             if (shouldQueueDriveSync() && currentDocType === 'chapter') pendingSync = true;
@@ -697,7 +821,12 @@ async function deleteDocument(event, id) {
         try {
             await api('DELETE', `/api/documents/${id}`);
             if (currentDocId === id) { currentDocId = null; hideEditor(); enableHeaderBtns(false); }
-            removeOpenTab(id); await loadDocuments(currentProjectId);
+            removeOpenTab(id);
+            projectStatsCache.delete(currentProjectId);
+            documentContentCache.delete(`chapter_${id}`);
+            const docs = documentsCache.get(currentProjectId) || [];
+            documentsCache.set(currentProjectId, docs.filter(doc => doc.id !== id));
+            renderCachedDocuments(currentProjectId);
         } catch (e) { console.error('deleteDocument:', e); }
     }, 'Delete Chapter?');
 }
@@ -1069,11 +1198,34 @@ async function loadLore(projectId) {
     catch (e) { console.error('loadLore:', e); }
 }
 
-function updateLoreMapInputLabels() {
-    const xValue = document.getElementById('loreMapXInput')?.value ?? 50;
-    const yValue = document.getElementById('loreMapYInput')?.value ?? 50;
-    document.getElementById('loreMapXValue').textContent = `${Math.round(xValue)}%`;
-    document.getElementById('loreMapYValue').textContent = `${Math.round(yValue)}%`;
+function addLoreAliasInput(value = '') {
+    const list = document.getElementById('loreAliasesList');
+    if (!list) return;
+    const row = document.createElement('div');
+    row.className = 'char-title-row';
+    row.innerHTML = `
+        <input type="text" class="modal-input lore-alias-input" placeholder="e.g. The First Flame, Old Capital..." value="${escapeHtml(value)}">
+        <button type="button" class="btn-ghost-sm char-title-remove" aria-label="Remove name">&times;</button>
+    `;
+    row.querySelector('.char-title-remove').addEventListener('click', () => {
+        row.remove();
+        if (!list.children.length) addLoreAliasInput('');
+    });
+    list.appendChild(row);
+}
+
+function getLoreAliases() {
+    return Array.from(document.querySelectorAll('.lore-alias-input'))
+        .map(input => input.value.trim())
+        .filter(Boolean);
+}
+
+function setLoreAliases(values = []) {
+    const list = document.getElementById('loreAliasesList');
+    if (!list) return;
+    list.innerHTML = '';
+    const items = Array.isArray(values) && values.length ? values : [''];
+    items.forEach(value => addLoreAliasInput(value));
 }
 
 function getLorePayloadFromModal() {
@@ -1086,11 +1238,11 @@ function getLorePayloadFromModal() {
         name: document.getElementById('loreNameInput').value.trim(),
         category,
         description: document.getElementById('loreDescInput').value.trim(),
+        aliases: getLoreAliases(),
         image_url: document.getElementById('loreImageInput').value.trim(),
         event_date: document.getElementById('loreEventDateInput').value.trim(),
         event_order: parseInt(document.getElementById('loreEventOrderInput').value || '0', 10) || 0,
-        map_x: parseFloat(document.getElementById('loreMapXInput').value || '50'),
-        map_y: parseFloat(document.getElementById('loreMapYInput').value || '50')
+        show_in_web: !!document.getElementById('loreShowInWebInput').checked
     };
 }
 
@@ -1124,12 +1276,11 @@ async function openEditLoreModal(id) {
         document.getElementById('loreCustomCategoryInput').value = presetLoreCategories.includes(item.category) ? '' : (item.category || '');
         updateLoreCategoryCustomInput();
         document.getElementById('loreDescInput').value = item.description || '';
+        setLoreAliases(item.aliases || []);
         document.getElementById('loreImageInput').value = item.image_url || '';
         document.getElementById('loreEventDateInput').value = item.event_date || '';
         document.getElementById('loreEventOrderInput').value = item.event_order ?? 0;
-        document.getElementById('loreMapXInput').value = item.map_x ?? 50;
-        document.getElementById('loreMapYInput').value = item.map_y ?? 50;
-        updateLoreMapInputLabels();
+        document.getElementById('loreShowInWebInput').checked = item.show_in_web !== false;
         const preview = document.getElementById('loreImgPreview');
         if (item.image_url) { document.getElementById('loreImgPreviewEl').src = item.image_url; preview.style.display = 'block'; }
         else { preview.style.display = 'none'; }
@@ -1162,9 +1313,8 @@ function resetLoreModal() {
     ['loreNameInput', 'loreDescInput', 'loreImageInput', 'loreEventDateInput', 'loreEventOrderInput', 'loreCustomCategoryInput'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('loreCategoryInput').value = 'item';
     updateLoreCategoryCustomInput();
-    document.getElementById('loreMapXInput').value = 50;
-    document.getElementById('loreMapYInput').value = 50;
-    updateLoreMapInputLabels();
+    setLoreAliases([]);
+    document.getElementById('loreShowInWebInput').checked = true;
     document.getElementById('loreImgPreview').style.display = 'none';
     document.getElementById('loreImgPreviewEl').src = '';
     document.getElementById('loreImageFile').value = '';
@@ -1183,6 +1333,7 @@ let loreHoveredNodeId = null;
 let loreHoveredEdgeId = null;
 let loreMapDragState = null;
 let loreMapRelations = [];
+let loreAllRelationships = [];
 let loreTimelineItems = [];
 let loreTimelineEdges = [];
 
@@ -1409,7 +1560,7 @@ function drawLoreWeb() {
         edge._mx = midX;
         edge._my = midY;
 
-        ctx.beginPath(); 
+        ctx.beginPath();
         ctx.moveTo(a.x, a.y);
         ctx.quadraticCurveTo(cpX, cpY, b.x, b.y);
         ctx.strokeStyle = edge.color || '#5f8fd6';
@@ -1625,6 +1776,7 @@ function setupLoreCanvasEvents() {
         const mx = e.clientX - rect.left;
         const my = e.clientY - rect.top;
         const moved = mouseDownPos && Math.hypot(mx - mouseDownPos.x, my - mouseDownPos.y) > 5;
+        const draggedNode = loreDragging;
         if (!moved && Date.now() - mouseDownTime < 300 && !loreDragging) {
             const cx = (mx - lorePanX) / loreZoom;
             const cy = (my - lorePanY) / loreZoom;
@@ -1635,6 +1787,12 @@ function setupLoreCanvasEvents() {
         loreIsPanning = false;
         mouseDownPos = null;
         loreCanvas.style.cursor = 'grab';
+        if (draggedNode) {
+            api('PUT', `/api/lore/${draggedNode.id}`, {
+                web_x: draggedNode.x,
+                web_y: draggedNode.y
+            }).catch(err => console.error('persistLoreWebPosition:', err));
+        }
     };
 
     loreCanvas.ondblclick = (e) => {
@@ -1687,6 +1845,101 @@ function getLoreCategoryLabel(category) {
     return map[category] || 'Lore';
 }
 
+function getLoreCategoryKey(category) {
+    return String(category || 'other').trim().toLowerCase() || 'other';
+}
+
+function getLoreCategoryViewLabel(category) {
+    const normalized = getLoreCategoryKey(category);
+    const preset = getLoreCategoryLabel(normalized);
+    if (preset !== 'Lore') return `${preset} Web`;
+    return `${normalized.replace(/[-_]+/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase())} Web`;
+}
+
+function buildLoreWebViews(items) {
+    const visibleItems = items.filter(item => item.show_in_web !== false);
+    const groups = new Map();
+    visibleItems.forEach(item => {
+        const key = getLoreCategoryKey(item.category);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(item);
+    });
+
+    const views = [];
+    const mixedItems = [];
+    [...groups.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .forEach(([category, group]) => {
+            if (group.length >= 3) {
+                views.push({
+                    key: category,
+                    label: getLoreCategoryViewLabel(category),
+                    items: group
+                });
+            } else {
+                mixedItems.push(...group);
+            }
+        });
+
+    if (mixedItems.length || !views.length) {
+        views.unshift({
+            key: 'mixed',
+            label: views.length ? 'Mixed Lore Web' : 'Lore Web',
+            items: mixedItems.length ? mixedItems : visibleItems
+        });
+    }
+
+    return views;
+}
+
+function populateLoreWebViewSelect(views) {
+    if (!loreWebViewSelect) return;
+    loreWebViewSelect.innerHTML = views
+        .map(view => `<option value="${escapeHtml(view.key)}">${escapeHtml(view.label)} (${view.items.length})</option>`)
+        .join('');
+    const nextValue = views.some(view => view.key === currentLoreWebView) ? currentLoreWebView : (views[0]?.key || 'mixed');
+    currentLoreWebView = nextValue;
+    loreWebViewSelect.value = nextValue;
+}
+
+function getLoreWebViewItems() {
+    const selectedView = currentLoreWebViews.find(view => view.key === currentLoreWebView) || currentLoreWebViews[0];
+    return selectedView?.items || [];
+}
+
+function buildLoreWebPositions(items, width, height) {
+    const categories = [...new Set(items.map(item => item.category || 'other'))];
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const clusterRadius = Math.min(width, height) * 0.24;
+    const innerRadius = 90;
+    const positions = new Map();
+    categories.forEach((category, categoryIndex) => {
+        const group = items.filter(item => (item.category || 'other') === category);
+        const angleBase = (Math.PI * 2 * categoryIndex) / Math.max(categories.length, 1) - Math.PI / 2;
+        const groupCenterX = centerX + Math.cos(angleBase) * clusterRadius;
+        const groupCenterY = centerY + Math.sin(angleBase) * clusterRadius;
+        group.forEach((item, index) => {
+            const angle = (Math.PI * 2 * index) / Math.max(group.length, 1);
+            positions.set(item.id, {
+                x: groupCenterX + Math.cos(angle) * innerRadius,
+                y: groupCenterY + Math.sin(angle) * innerRadius
+            });
+        });
+    });
+    return positions;
+}
+
+async function persistCharacterWebPosition(id, x, y) {
+    const item = currentCharacters.find(entry => entry.id === id);
+    if (!item) return;
+    item.web_x = x;
+    item.web_y = y;
+    try {
+        await api('PUT', `/api/characters/${id}`, { web_x: x, web_y: y });
+    } catch (e) { console.error('persistCharacterWebPosition:', e); }
+}
+
 async function openLoreWeb() {
     try {
         const [items, rels] = await Promise.all([
@@ -1694,51 +1947,62 @@ async function openLoreWeb() {
             loadLoreRelationships(currentProjectId)
         ]);
         currentLoreItems = items;
-        if (!items.length) {
-            await showNotice('No lore entries yet.', 'Nothing To Show', 'warning');
-            return;
-        }
-        document.getElementById('loreWebProjectName').textContent = `${currentProjectData?.title || ''} - Lore Web`;
+        loreAllRelationships = rels;
         document.getElementById('loreWebOverlay').style.display = 'flex';
         document.body.classList.add('rel-web-open');
         loreCanvas = document.getElementById('loreWebCanvas');
         loreCtx = loreCanvas.getContext('2d');
         await new Promise(r => setTimeout(r, 40));
-        resizeLoreCanvas();
-        const width = loreCanvas._cssW || loreCanvas.offsetWidth;
-        const height = loreCanvas._cssH || loreCanvas.offsetHeight;
-        const cx = width / 2;
-        const cy = height / 2;
-        const radius = Math.min(cx, cy) * 0.55;
-        loreZoom = 1;
-        lorePanX = 0;
-        lorePanY = 0;
-        loreNodes = items.map((item, index) => {
-            const angle = (Math.PI * 2 * index) / items.length - Math.PI / 2;
-            return {
-                ...item,
-                x: cx + radius * Math.cos(angle),
-                y: cy + radius * Math.sin(angle),
-                color: getLoreCategoryColor(item.category),
-                shortLabel: (item.name || '?').slice(0, 2).toUpperCase(),
-                img: null
-            };
-        });
-        loreEdges = rels;
-        loreHoveredNodeId = null;
-        loreNodes.forEach(node => {
-            if (node.image_url) {
-                const img = new Image();
-                img.src = node.image_url;
-                img.onload = () => {
-                    node.img = img;
-                    drawLoreWeb();
-                };
-            }
-        });
+        await renderActiveLoreWeb();
         setupLoreCanvasEvents();
-        drawLoreWeb();
     } catch (e) { console.error('openLoreWeb:', e); }
+}
+
+async function renderActiveLoreWeb() {
+    currentLoreWebViews = buildLoreWebViews(currentLoreItems);
+    const selectedItems = getLoreWebViewItems();
+    if (!selectedItems.length) {
+        await showNotice('No lore entries yet.', 'Nothing To Show', 'warning');
+        closeLoreWeb();
+        return;
+    }
+    populateLoreWebViewSelect(currentLoreWebViews);
+    const selectedView = currentLoreWebViews.find(view => view.key === currentLoreWebView) || currentLoreWebViews[0];
+    document.getElementById('loreWebProjectName').textContent = `${currentProjectData?.title || ''} - ${selectedView?.label || 'Lore Web'}`;
+    if (!loreCanvas || !loreCtx) return;
+    await new Promise(r => setTimeout(r, 10));
+    resizeLoreCanvas();
+    const width = loreCanvas._cssW || loreCanvas.offsetWidth;
+    const height = loreCanvas._cssH || loreCanvas.offsetHeight;
+    const fallbackPositions = buildLoreWebPositions(selectedItems, width, height);
+    loreZoom = 1;
+    lorePanX = 0;
+    lorePanY = 0;
+    loreNodes = selectedItems.map((item) => {
+        const fallback = fallbackPositions.get(item.id) || { x: width / 2, y: height / 2 };
+        return {
+            ...item,
+            x: Number.isFinite(item.web_x) ? item.web_x : fallback.x,
+            y: Number.isFinite(item.web_y) ? item.web_y : fallback.y,
+            color: getLoreCategoryColor(item.category),
+            shortLabel: (item.name || '?').slice(0, 2).toUpperCase(),
+            img: null
+        };
+    });
+    const visibleIds = new Set(selectedItems.map(item => item.id));
+    loreEdges = loreAllRelationships.filter(rel => visibleIds.has(rel.lore_a_id) && visibleIds.has(rel.lore_b_id));
+    loreHoveredNodeId = null;
+    loreNodes.forEach(node => {
+        if (node.image_url) {
+            const img = new Image();
+            img.src = node.image_url;
+            img.onload = () => {
+                node.img = img;
+                drawLoreWeb();
+            };
+        }
+    });
+    drawLoreWeb();
 }
 
 function loreZoomIn() { loreZoom = Math.min(loreZoom * 1.15, 4); drawLoreWeb(); }
@@ -1762,6 +2026,17 @@ function buildTimelineLinks(item, rels) {
             return `<span class="timeline-link-chip">${escapeHtml(formatLoreRelationLabel(rel.relation_type))}: ${escapeHtml(otherName)}</span>`;
         })
         .join('');
+}
+
+function parseLoreTimelineValue(value) {
+    const raw = String(value || '').trim().toLowerCase();
+    if (!raw) return Number.POSITIVE_INFINITY;
+    const numberMatch = raw.match(/-?\d+(?:\.\d+)?/);
+    if (!numberMatch) return Number.POSITIVE_INFINITY;
+    const numeric = parseFloat(numberMatch[0]);
+    if (raw.includes('bce') || raw.includes('bc')) return numeric * -1;
+    if (raw.includes('ago') || raw.includes('before')) return numeric * -1;
+    return numeric;
 }
 
 function closeLoreTimeline() {
@@ -1808,7 +2083,12 @@ async function openLoreTimeline() {
         ]);
         loreTimelineItems = items
             .filter(item => item.category === 'event' || item.event_date)
-            .sort((a, b) => (a.event_order ?? 0) - (b.event_order ?? 0) || (a.event_date || '').localeCompare(b.event_date || '') || a.name.localeCompare(b.name));
+            .sort((a, b) =>
+                parseLoreTimelineValue(a.event_date) - parseLoreTimelineValue(b.event_date) ||
+                (a.event_order ?? 0) - (b.event_order ?? 0) ||
+                (a.event_date || '').localeCompare(b.event_date || '') ||
+                a.name.localeCompare(b.name)
+            );
         loreTimelineEdges = rels;
         document.getElementById('loreTimelineProjectName').textContent = `${currentProjectData?.title || ''} - Lore Timeline`;
         document.getElementById('loreTimelineOverlay').style.display = 'flex';
@@ -1822,7 +2102,12 @@ async function openLoreTimeline() {
 function renderLoreMap(items, rels) {
     loreMapRelations = rels;
     const places = items.filter(item => item.category === 'place');
+    loreMapBoard.style.backgroundImage = currentProjectData?.map_image_url ? `url("${currentProjectData.map_image_url}")` : 'none';
+    loreMapBoard.style.backgroundSize = currentProjectData?.map_image_url ? 'contain' : '';
+    loreMapBoard.style.backgroundPosition = currentProjectData?.map_image_url ? 'center center' : '';
+    loreMapBoard.style.backgroundRepeat = currentProjectData?.map_image_url ? 'no-repeat' : '';
     const connectionCounts = new Map();
+    const placesById = new Map(places.map(item => [item.id, item]));
     rels.forEach(rel => {
         connectionCounts.set(rel.lore_a_id, (connectionCounts.get(rel.lore_a_id) || 0) + 1);
         connectionCounts.set(rel.lore_b_id, (connectionCounts.get(rel.lore_b_id) || 0) + 1);
@@ -1863,8 +2148,8 @@ function renderLoreMap(items, rels) {
     loreMapLines.innerHTML = rels
         .filter(rel => placeIds.has(rel.lore_a_id) && placeIds.has(rel.lore_b_id))
         .map(rel => {
-            const a = places.find(item => item.id === rel.lore_a_id);
-            const b = places.find(item => item.id === rel.lore_b_id);
+            const a = placesById.get(rel.lore_a_id);
+            const b = placesById.get(rel.lore_b_id);
             if (!a || !b) return '';
             return `<line class="lore-map-line" x1="${a.map_x}%" y1="${a.map_y}%" x2="${b.map_x}%" y2="${b.map_y}%" stroke="${rel.color || '#5f8fd6'}"></line>`;
         })
@@ -1891,14 +2176,16 @@ async function persistLoreMapPosition(id, x, y) {
 }
 
 function setupLoreMapDrag() {
+    const getPlaceMap = () => new Map(currentLoreItems.filter(item => item.category === 'place').map(item => [item.id, item]));
     loreMapBoard.onmousemove = (e) => {
         if (!loreMapDragState) {
+            const placeMap = getPlaceMap();
             const rect = loreMapBoard.getBoundingClientRect();
             const mouseX = ((e.clientX - rect.left) / rect.width) * 100;
             const mouseY = ((e.clientY - rect.top) / rect.height) * 100;
             const hoveredEdge = loreMapRelations.find(rel => {
-                const a = currentLoreItems.find(item => item.id === rel.lore_a_id && item.category === 'place');
-                const b = currentLoreItems.find(item => item.id === rel.lore_b_id && item.category === 'place');
+                const a = placeMap.get(rel.lore_a_id);
+                const b = placeMap.get(rel.lore_b_id);
                 if (!a || !b) return false;
                 const distance = Math.abs((b.map_y - a.map_y) * mouseX - (b.map_x - a.map_x) * mouseY + b.map_x * a.map_y - b.map_y * a.map_x) /
                     (Math.hypot(b.map_y - a.map_y, b.map_x - a.map_x) || 1);
@@ -1960,6 +2247,21 @@ async function openLoreMap() {
         renderLoreMap(items, rels);
         setupLoreMapDrag();
     } catch (e) { console.error('openLoreMap:', e); }
+}
+
+async function updateProjectMapImage(imageUrl) {
+    if (!currentProjectId) return;
+    try {
+        currentProjectData = await api('PUT', `/api/projects/${currentProjectId}`, {
+            map_image_url: imageUrl || ''
+        });
+        if (document.getElementById('loreMapOverlay').style.display !== 'none') {
+            renderLoreMap(currentLoreItems, loreMapRelations);
+        }
+    } catch (e) {
+        console.error('updateProjectMapImage:', e);
+        await showNotice(e.message || 'Could not update the map image.', 'Map Image Failed', 'danger');
+    }
 }
 
 function closeLoreMap() {
@@ -2292,10 +2594,11 @@ function buildCharacterTooltipEntry(character, { compact = false } = {}) {
 }
 
 function buildLoreTooltipEntry(entry) {
+    const aliasList = Array.isArray(entry.aliases) ? entry.aliases.filter(Boolean) : [];
     return {
         name: entry.name || '',
         meta: entry.category ? `Lore | ${getLoreCategoryLabel(entry.category)}` : 'Lore',
-        titlesText: '',
+        titlesText: aliasList.join(' | '),
         image_url: entry.image_url || '',
         bodyHtml: entry.summary
             ? `<div class="wiki-card-field"><div class="wiki-card-field-value">${escapeHtml(entry.summary)}</div></div>`
@@ -2733,8 +3036,8 @@ async function openRelWeb() {
                 appearance: c.appearance || '',
                 extra_notes: c.extra_notes || '',
                 image_url: c.image_url || '',
-                x: cx + radius * Math.cos(angle),
-                y: cy + radius * Math.sin(angle),
+                x: Number.isFinite(c.web_x) ? c.web_x : cx + radius * Math.cos(angle),
+                y: Number.isFinite(c.web_y) ? c.web_y : cy + radius * Math.sin(angle),
                 img: null
             };
         });
@@ -2952,6 +3255,7 @@ function setupRelCanvasEvents() {
         const rect = relCanvas.getBoundingClientRect();
         const mx = e.clientX - rect.left, my = e.clientY - rect.top;
         const moved = mouseDownPos && Math.hypot(mx - mouseDownPos.x, my - mouseDownPos.y) > 5;
+        const draggedNode = relDragging;
         if (!moved && Date.now() - mouseDownTime < 300 && !relDragging) {
             const cx = (mx - relPanX) / relZoom, cy = (my - relPanY) / relZoom;
             const clicked = relEdges.find(edge => isNearCurve(cx, cy, edge));
@@ -2959,6 +3263,9 @@ function setupRelCanvasEvents() {
         }
         relDragging = null; relIsPanning = false; mouseDownPos = null;
         relCanvas.style.cursor = 'grab';
+        if (draggedNode) {
+            persistCharacterWebPosition(draggedNode.id, draggedNode.x, draggedNode.y);
+        }
     };
 
     relCanvas.ondblclick = (e) => {
@@ -3110,7 +3417,7 @@ window.addEventListener('online', async () => {
     updateSaveButtonState();
     if (pendingSync && canAttemptDriveSync() && currentDocId && currentDocType === 'chapter') {
         setSaveStatus('syncing');
-        try { await saveDocument(); pendingSync = false; } catch (e) { }
+        try { await queueDriveSync(currentDocId); } catch (e) { }
     }
 });
 
@@ -3132,6 +3439,32 @@ function updateStats() {
 function updateLastSaved() {
     if (!lastSavedTimeEl) return;
     lastSavedTimeEl.textContent = `Saved at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+function queueDriveSync(docId) {
+    pendingSync = false;
+    pendingSyncPromise = api('POST', `/api/documents/${docId}/sync`)
+        .then(() => {
+            if (currentDocId === docId && currentDocType === 'chapter') {
+                setSaveStatus('synced');
+                setTimeout(() => {
+                    if (currentDocId === docId && currentDocType === 'chapter' && !saveStatus.classList.contains('unsaved')) {
+                        setSaveStatus('saved');
+                    }
+                }, 1500);
+            }
+        })
+        .catch(async e => {
+            console.error('driveSync:', e);
+            if (currentDocId === docId && currentDocType === 'chapter') {
+                setSaveStatus('error');
+            }
+            await showNotice('Drive sync failed. Please try again after restarting the app.', 'Sync Failed', 'danger');
+        })
+        .finally(() => {
+            pendingSyncPromise = null;
+        });
+    return pendingSyncPromise;
 }
 
 // --- UI HELPERS ---
@@ -3251,9 +3584,10 @@ async function checkAuthState() {
         if (data.logged_in) {
             authState = { loggedIn: true, mode: 'account' };
             storageScopeKey = data.scope_key || `user_${data.user.id}`;
+            localStorage.removeItem('scripvia_guest');
+            localStorage.removeItem('scripvia_guest_scope');
             loginBtn.style.display = 'none'; userInfo.classList.remove('hidden');
-            userAvatar.style.display = 'block';
-            userAvatar.src = data.user.picture;
+            setUserAvatar(data.user.name, data.user.picture);
             document.getElementById('userName').textContent = data.user.name.split(' ')[0];
         } else {
             authState = { loggedIn: false, mode: 'guest' };
@@ -3331,6 +3665,8 @@ document.addEventListener('DOMContentLoaded', () => {
     ensureWikiTooltipLayout();
     ensureRelationTypeInputs();
     ensureCharacterTitlesUI();
+    setLoreAliases([]);
+    document.getElementById('addLoreAliasBtn').addEventListener('click', () => addLoreAliasInput(''));
     document.getElementById('wikiCardClose').addEventListener('click', hideWikiTooltip);
     document.getElementById('backToOverview').addEventListener('click', () => { hideEditor(); showProjectOverview(currentProjectId); });
     document.getElementById('notesToggleBtn').addEventListener('click', toggleNotesPanel);
@@ -3343,6 +3679,10 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('viewLoreWebBtn').addEventListener('click', openLoreWeb);
     document.getElementById('viewLoreTimelineBtn').addEventListener('click', openLoreTimeline);
     document.getElementById('viewLoreMapBtn').addEventListener('click', openLoreMap);
+    document.getElementById('loreWebViewSelect').addEventListener('change', async e => {
+        currentLoreWebView = e.target.value || 'mixed';
+        if (document.getElementById('loreWebOverlay').style.display !== 'none') await renderActiveLoreWeb();
+    });
     document.getElementById('relWebClose').addEventListener('click', closeRelWeb);
     document.getElementById('relWebAddBtn').addEventListener('click', () => openNewRelModal());
     document.getElementById('loreWebClose').addEventListener('click', closeLoreWeb);
@@ -3352,6 +3692,20 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('loreMapHelpBtn').addEventListener('click', () => {
         showNotice('Drag location nodes around the board to arrange your world map. Double-click a place to edit it.', 'Lore Map Help', 'info');
     });
+    document.getElementById('loreMapSetImageBtn').addEventListener('click', () => {
+        document.getElementById('loreMapImageFile').click();
+    });
+    document.getElementById('loreMapImageFile').addEventListener('change', () => {
+        const file = document.getElementById('loreMapImageFile').files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async e => {
+            await updateProjectMapImage(e.target.result);
+            document.getElementById('loreMapImageFile').value = '';
+        };
+        reader.readAsDataURL(file);
+    });
+    document.getElementById('loreMapClearImageBtn').addEventListener('click', () => updateProjectMapImage(''));
     document.getElementById('loreTimelineCategoryFilter').addEventListener('change', applyLoreTimelineFilters);
     document.getElementById('loreTimelineSearch').addEventListener('input', applyLoreTimelineFilters);
     document.getElementById('cancelRelBtn').addEventListener('click', () => closeModal(newRelModal));
@@ -3373,8 +3727,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('cancelEditRelBtnX').addEventListener('click', () => closeModal(document.getElementById('editRelModal')));
     document.getElementById('deleteRelFromEditBtn').addEventListener('click', deleteRelFromEdit);
     document.getElementById('loreCategoryInput').addEventListener('change', updateLoreCategoryCustomInput);
-    document.getElementById('loreMapXInput').addEventListener('input', updateLoreMapInputLabels);
-    document.getElementById('loreMapYInput').addEventListener('input', updateLoreMapInputLabels);
 
     document.querySelectorAll('#relColorPicker .rel-color-opt').forEach(opt => {
         opt.addEventListener('click', () => {
@@ -3402,15 +3754,34 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     fetch('/auth/me').then(r => r.json()).then(data => {
-        if (!data.logged_in && !localStorage.getItem('scripvia_guest')) { window.location.href = '/login'; return; }
-        applyTheme(); applySidebar(); initQuill(); loadProjects(); checkAuthState();
-    }).catch(() => { applyTheme(); applySidebar(); initQuill(); loadProjects(); });
+        // If online account is active, clear any stale guest data
+        if (data.logged_in) {
+            localStorage.removeItem('scripvia_guest');
+            localStorage.removeItem('scripvia_guest_scope');
+        }
+
+        // If no session at all → go to login
+        if (!data.logged_in && !localStorage.getItem('scripvia_guest')) {
+            window.location.href = '/login';
+            return;
+        }
+
+        applyTheme();
+        applySidebar();
+        initQuill();
+        loadProjects();
+        checkAuthState();
+    }).catch(() => {
+        applyTheme();
+        applySidebar();
+        initQuill();
+        loadProjects();
+    });
     populateLoreRelationTypeSelects();
     document.querySelector('#loreWebOverlay .rel-web-hint').textContent = 'Scroll to zoom | Drag canvas to pan | Click connection to edit | Double-click a lore node to connect it';
     setupImageUpload('charImageFile', 'charImageInput', 'charImgPreview', 'charImgPreviewEl', 'clearCharImg', true);
     setupImageUpload('loreImageFile', 'loreImageInput', 'loreImgPreview', 'loreImgPreviewEl', 'clearLoreImg', false);
     updateLoreCategoryCustomInput();
-    updateLoreMapInputLabels();
     document.getElementById('cropConfirmBtn')?.addEventListener('click', confirmCrop);
     document.getElementById('cropModalClose')?.addEventListener('click', () => closeModal(document.getElementById('cropModal')));
     document.getElementById('cropCancelBtn')?.addEventListener('click', () => closeModal(document.getElementById('cropModal')));

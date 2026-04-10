@@ -280,6 +280,7 @@
             <div class="rel-web-title"><span>&#128214;</span><span id="loreWebProjectName">Lore Web</span>
             </div>
             <div class="rel-web-actions">
+                <select class="modal-select lore-web-select" id="loreWebViewSelect" title="Choose which lore web to view"></select>
                 <button class="btn-ghost" id="loreWebAddBtn">+ Add Connection</button>
                 <button class="rel-web-close" id="loreWebClose">&times;</button>
             </div>
@@ -325,6 +326,9 @@
             </div>
             <div class="rel-web-actions">
                 <button class="btn-ghost" id="loreMapHelpBtn" type="button">Drag Places</button>
+                <button class="btn-ghost" id="loreMapSetImageBtn" type="button">Set Map Image</button>
+                <button class="btn-ghost" id="loreMapClearImageBtn" type="button">Clear Image</button>
+                <input type="file" id="loreMapImageFile" accept="image/*" style="display:none;">
                 <button class="rel-web-close" id="loreMapClose">&times;</button>
             </div>
         </div>
@@ -535,6 +539,11 @@
             </div>
             <label class="modal-label">Name *</label>
             <input type="text" class="modal-input" id="loreNameInput" placeholder="e.g. The Sealed God, Jaeyakdae...">
+            <label class="modal-label">Other Names / Titles <span class="optional">(optional)</span></label>
+            <div class="char-titles-section" id="loreAliasesSection">
+                <div class="char-title-list" id="loreAliasesList"></div>
+                <button type="button" class="btn-ghost-sm char-title-add" id="addLoreAliasBtn">+ Add name</button>
+            </div>
             <label class="modal-label">Category</label>
             <select class="modal-select" id="loreCategoryInput">
                 <option value="item">&#9876;&#65039; Item / Object</option>
@@ -554,21 +563,10 @@
             <input type="text" class="modal-input" id="loreEventDateInput" placeholder="e.g. 300 years ago, Year 42, Before the fall...">
             <label class="modal-label">Timeline Order <span class="optional">(smaller comes first)</span></label>
             <input type="number" class="modal-input" id="loreEventOrderInput" placeholder="0">
-            <label class="modal-label">Map Position <span class="optional">(for places)</span></label>
-            <div class="lore-map-coords">
-                <div>
-                    <span class="lore-map-coord-label">Horizontal</span>
-                    <input type="range" id="loreMapXInput" min="0" max="100" value="50">
-                </div>
-                <div>
-                    <span class="lore-map-coord-label">Vertical</span>
-                    <input type="range" id="loreMapYInput" min="0" max="100" value="50">
-                </div>
-            </div>
-            <div class="lore-map-coord-values">
-                <span id="loreMapXValue">50%</span>
-                <span id="loreMapYValue">50%</span>
-            </div>
+            <label class="modal-label" style="display:flex;align-items:center;gap:10px;text-transform:none;letter-spacing:0;">
+                <input type="checkbox" id="loreShowInWebInput" checked>
+                Show this lore entry in the Lore Web
+            </label>
             <label class="modal-label">Image <span class="optional">(optional)</span></label>
             <div class="img-input-wrap">
                 <input type="text" class="modal-input" id="loreImageInput" placeholder="Paste URL or upload below...">

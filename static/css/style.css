@@ -845,6 +845,8 @@ body { display: flex; height: 100vh; }
     border-radius: 50%;
     border: 1px solid var(--border-accent);
     flex-shrink: 0;
+    object-fit: cover;
+    background: rgba(255,255,255,0.08);
 }
 
 .user-name {
@@ -2328,6 +2330,11 @@ body.rel-web-open .editor-stats-bar {
     margin-bottom: 0;
 }
 
+.lore-web-select {
+    width: 220px;
+    margin-bottom: 0;
+}
+
 .lore-timeline-select {
     width: 160px;
     margin-bottom: 0;
@@ -2446,6 +2453,7 @@ body.rel-web-open .editor-stats-bar {
         radial-gradient(circle at 80% 30%, rgba(95,143,214,0.14), transparent 26%),
         linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0)),
         var(--bg-base);
+    background-repeat: no-repeat;
 }
 
 .lore-map-grid {

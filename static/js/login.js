@@ -20,7 +20,7 @@ document.getElementById('loginThemeToggle').addEventListener('click', () => {
 applyTheme();
 
 // --- GUEST LOGIN ---
-document.getElementById('guestLoginBtn').addEventListener('click', () => {
+document.getElementById('guestLoginBtn').addEventListener('click', async () => {
     const name = document.getElementById('guestNameInput').value.trim();
     if (!name) {
         document.getElementById('guestNameInput').focus();
@@ -28,12 +28,19 @@ document.getElementById('guestLoginBtn').addEventListener('click', () => {
         return;
     }
 
-    // Save guest info to localStorage
+    // Save guest info to localStorage (keep this for frontend use)
     localStorage.setItem('scripvia_guest', JSON.stringify({
         name,
         isGuest:   true,
         createdAt: Date.now()
     }));
+
+    // Tell Flask about the guest session so it can persist it
+    await fetch('/auth/guest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+    });
 
     // Redirect to main app
     window.location.href = '/';

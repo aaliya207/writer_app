@@ -6,20 +6,29 @@ const http = require('http');
 
 // Config
 const FLASK_PORT = 5000;
-const FLASK_URL = `http://127.0.0.1:${FLASK_PORT}`;
+// Keep Electron on the same origin used by the OAuth callback to avoid
+// splitting cookies/localStorage between localhost and 127.0.0.1.
+const FLASK_HOST = 'localhost';
+const FLASK_URL = `http://${FLASK_HOST}:${FLASK_PORT}`;
 const POLL_INTERVAL_MS = 300;
 const FLASK_TIMEOUT_MS = 30000;
 
 let mainWindow = null;
 let flaskProcess = null;
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!gotSingleInstanceLock) {
+  app.quit();
+}
 
 function getPackagedFlaskPath() {
   const candidates = [
+    path.join(process.resourcesPath, 'app', 'Scripvia.exe'),
+    path.join(path.dirname(process.execPath), 'resources', 'app', 'Scripvia.exe'),
+    path.join(path.dirname(process.execPath), 'app', 'Scripvia.exe'),
+    // fallback to old name just in case
     path.join(process.resourcesPath, 'app', 'app.exe'),
-    path.join(path.dirname(process.execPath), 'resources', 'app', 'app.exe'),
-    path.join(path.dirname(process.execPath), 'app', 'app.exe'),
   ];
-
   return candidates.find(candidate => fs.existsSync(candidate)) || candidates[0];
 }
 
@@ -154,6 +163,16 @@ app.whenReady().then(async () => {
       `);
     }
   }
+});
+
+app.on('second-instance', () => {
+  if (!mainWindow) {
+    return;
+  }
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  mainWindow.focus();
 });
 
 app.on('window-all-closed', () => {
