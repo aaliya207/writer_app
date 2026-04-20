@@ -24,7 +24,14 @@ let projectListCache = [];
 const projectStatsCache = new Map();
 const documentsCache = new Map();
 const documentContentCache = new Map();
+const documentScrollCache = new Map();
+const characterWebPositionCache = new Map();
+const loreWebPositionCache = new Map();
+const loreMapPositionCache = new Map();
 let pendingSyncPromise = null;
+let pendingSyncDocId = null;
+let lastDriveSyncErrorAt = 0;
+let lastDriveSyncErrorDocKey = '';
 let authState = {
     loggedIn: false,
     mode: 'guest'
@@ -94,6 +101,19 @@ function updateSaveButtonState() {
         saveBtn.textContent = 'Save Locally';
         saveBtn.title = 'Save on this device only';
     }
+}
+
+function getCachedChapter(id) {
+    const cacheKey = `chapter_${id}`;
+    const directCache = documentContentCache.get(cacheKey);
+    if (directCache) return directCache;
+    const docs = documentsCache.get(currentProjectId) || [];
+    const listedDoc = docs.find(doc => doc.id === id);
+    if (listedDoc) {
+        documentContentCache.set(cacheKey, listedDoc);
+        return listedDoc;
+    }
+    return null;
 }
 
 // --- IMAGE UPLOAD ---
@@ -290,8 +310,10 @@ function initQuill() {
                 if (bounds && container) {
                     const editorTop = document.querySelector('.ql-editor').offsetTop;
                     const cursorPosInEditor = editorTop + bounds.top;
-                    const targetScrollPos = cursorPosInEditor - (container.clientHeight * 0.35);
-                    if (cursorPosInEditor > container.scrollTop + (container.clientHeight * 0.35)) {
+                    const upperBound = container.scrollTop + (container.clientHeight * 0.32);
+                    const lowerBound = container.scrollTop + (container.clientHeight * 0.58);
+                    if (cursorPosInEditor < upperBound || cursorPosInEditor > lowerBound) {
+                        const targetScrollPos = cursorPosInEditor - (container.clientHeight * 0.42);
                         container.scrollTop = Math.max(0, targetScrollPos);
                     }
                 }
@@ -756,7 +778,7 @@ async function createDocument() {
         documentsCache.set(currentProjectId, [...docs, doc]);
         renderCachedDocuments();
         documentContentCache.set(`chapter_${doc.id}`, doc);
-        openDocument(doc.id);
+        await openDocument(doc.id);
     } catch (e) {
         console.error('createDocument:', e);
         await showNotice(e.message || 'Could not create the chapter right now. Please try again.', 'Chapter Creation Failed', 'danger');
@@ -766,8 +788,9 @@ async function createDocument() {
 
 async function openDocument(id, type = 'chapter') {
     try {
+        rememberCurrentDocumentScroll();
         const cacheKey = `${type}_${id}`;
-        let doc = type === 'chapter' ? documentContentCache.get(cacheKey) : null;
+        let doc = type === 'chapter' ? getCachedChapter(id) : null;
         if (!doc) {
             doc = await api('GET', type === 'scene' ? `/api/scenes/${id}` : `/api/documents/${id}`);
             if (type === 'chapter') documentContentCache.set(cacheKey, doc);
@@ -779,6 +802,7 @@ async function openDocument(id, type = 'chapter') {
         showEditor(); enableHeaderBtns(true);
         if (!await checkLocalStorageRestore(`${type}_${id}`, doc.content || '')) setSaveStatus('saved');
         updateStats(); startAutoSave(); addOpenTab(id, doc.title, type);
+        restoreDocumentScroll(id, type);
         if (type === 'chapter' && currentProjectId) renderCachedDocuments(currentProjectId);
         if (type === 'scene' && currentProjectId) await loadScenes(currentProjectId);
     } catch (e) { console.error('openDocument:', e); }
@@ -839,6 +863,12 @@ async function loadCharacters(projectId) {
 
 function renderCharacters(chars) {
     currentCharacters = chars;
+    chars.forEach(char => {
+        if (Number.isFinite(char.web_x) && Number.isFinite(char.web_y)) {
+            characterWebPositionCache.set(char.id, { x: char.web_x, y: char.web_y });
+            storeWebPosition('character_web', char.id, char.web_x, char.web_y, currentProjectId);
+        }
+    });
     if (!chars.length) { charactersList.innerHTML = '<li class="empty-state">No characters yet.</li>'; return; }
     charactersList.innerHTML = chars.map(c => `
         <li class="item-list-entry character-list-entry" data-char-id="${c.id}" onclick="openEditCharModal(${c.id})">
@@ -1191,7 +1221,26 @@ async function loadLore(projectId) {
             api('GET', `/api/projects/${projectId}/lore`),
             loadLoreRelationships(projectId)
         ]);
-        currentLoreItems = items;
+        currentLoreItems = items.map(item => {
+            const webPos = getStoredWebPosition('lore_web', item.id, projectId) || loreWebPositionCache.get(item.id);
+            const mapPos = getStoredWebPosition('lore_map', item.id, projectId) || loreMapPositionCache.get(item.id);
+            const nextItem = {
+                ...item,
+                web_x: webPos?.x ?? Number(item.web_x),
+                web_y: webPos?.y ?? Number(item.web_y),
+                map_x: mapPos?.x ?? Number(item.map_x),
+                map_y: mapPos?.y ?? Number(item.map_y)
+            };
+            if (Number.isFinite(nextItem.web_x) && Number.isFinite(nextItem.web_y)) {
+                loreWebPositionCache.set(nextItem.id, { x: nextItem.web_x, y: nextItem.web_y });
+                storeWebPosition('lore_web', nextItem.id, nextItem.web_x, nextItem.web_y, projectId);
+            }
+            if (Number.isFinite(nextItem.map_x) && Number.isFinite(nextItem.map_y)) {
+                loreMapPositionCache.set(nextItem.id, { x: nextItem.map_x, y: nextItem.map_y });
+                storeWebPosition('lore_map', nextItem.id, nextItem.map_x, nextItem.map_y, projectId);
+            }
+            return nextItem;
+        });
         loreEdges = rels;
         renderLore(currentLoreItems);
     }
@@ -1788,6 +1837,8 @@ function setupLoreCanvasEvents() {
         mouseDownPos = null;
         loreCanvas.style.cursor = 'grab';
         if (draggedNode) {
+            loreWebPositionCache.set(draggedNode.id, { x: draggedNode.x, y: draggedNode.y });
+            storeWebPosition('lore_web', draggedNode.id, draggedNode.x, draggedNode.y);
             api('PUT', `/api/lore/${draggedNode.id}`, {
                 web_x: draggedNode.x,
                 web_y: draggedNode.y
@@ -1935,6 +1986,8 @@ async function persistCharacterWebPosition(id, x, y) {
     if (!item) return;
     item.web_x = x;
     item.web_y = y;
+    characterWebPositionCache.set(id, { x, y });
+    storeWebPosition('character_web', id, x, y);
     try {
         await api('PUT', `/api/characters/${id}`, { web_x: x, web_y: y });
     } catch (e) { console.error('persistCharacterWebPosition:', e); }
@@ -1946,7 +1999,17 @@ async function openLoreWeb() {
             api('GET', `/api/projects/${currentProjectId}/lore`),
             loadLoreRelationships(currentProjectId)
         ]);
-        currentLoreItems = items;
+        currentLoreItems = items.map(item => {
+            const webPos = getStoredWebPosition('lore_web', item.id) || loreWebPositionCache.get(item.id);
+            const mapPos = getStoredWebPosition('lore_map', item.id) || loreMapPositionCache.get(item.id);
+            return {
+                ...item,
+                web_x: webPos?.x ?? Number(item.web_x),
+                web_y: webPos?.y ?? Number(item.web_y),
+                map_x: mapPos?.x ?? Number(item.map_x),
+                map_y: mapPos?.y ?? Number(item.map_y)
+            };
+        });
         loreAllRelationships = rels;
         document.getElementById('loreWebOverlay').style.display = 'flex';
         document.body.classList.add('rel-web-open');
@@ -2161,6 +2224,8 @@ async function persistLoreMapPosition(id, x, y) {
     if (!item) return;
     item.map_x = x;
     item.map_y = y;
+    loreMapPositionCache.set(id, { x, y });
+    storeWebPosition('lore_map', id, x, y);
     try {
         await api('PUT', `/api/lore/${id}`, {
             name: item.name,
@@ -2240,7 +2305,17 @@ async function openLoreMap() {
             api('GET', `/api/projects/${currentProjectId}/lore`),
             loadLoreRelationships(currentProjectId)
         ]);
-        currentLoreItems = items;
+        currentLoreItems = items.map(item => {
+            const webPos = getStoredWebPosition('lore_web', item.id) || loreWebPositionCache.get(item.id);
+            const mapPos = getStoredWebPosition('lore_map', item.id) || loreMapPositionCache.get(item.id);
+            return {
+                ...item,
+                web_x: webPos?.x ?? Number(item.web_x),
+                web_y: webPos?.y ?? Number(item.web_y),
+                map_x: mapPos?.x ?? Number(item.map_x),
+                map_y: mapPos?.y ?? Number(item.map_y)
+            };
+        });
         document.getElementById('loreMapProjectName').textContent = `${currentProjectData?.title || ''} - Lore Map`;
         document.getElementById('loreMapOverlay').style.display = 'flex';
         document.body.classList.add('rel-web-open');
@@ -3011,7 +3086,21 @@ async function openRelWeb() {
             api('GET', `/api/projects/${currentProjectId}/characters`),
             api('GET', `/api/projects/${currentProjectId}/relationships`)
         ]);
-        if (!chars.length) { await showNotice('No characters in this project yet.', 'Nothing To Show', 'warning'); return; }
+        const mergedChars = chars.map(char => {
+            const cachedPos = getStoredWebPosition('character_web', char.id) || characterWebPositionCache.get(char.id);
+            const nextChar = {
+                ...char,
+                web_x: cachedPos?.x ?? Number(char.web_x),
+                web_y: cachedPos?.y ?? Number(char.web_y)
+            };
+            if (Number.isFinite(nextChar.web_x) && Number.isFinite(nextChar.web_y)) {
+                characterWebPositionCache.set(nextChar.id, { x: nextChar.web_x, y: nextChar.web_y });
+                storeWebPosition('character_web', nextChar.id, nextChar.web_x, nextChar.web_y);
+            }
+            return nextChar;
+        });
+        currentCharacters = mergedChars;
+        if (!mergedChars.length) { await showNotice('No characters in this project yet.', 'Nothing To Show', 'warning'); return; }
         document.getElementById('relWebProjectName').textContent = `${currentProjectData?.title || ''} - Character Web`;
         document.getElementById('relWebOverlay').style.display = 'flex';
         document.body.classList.add("rel-web-open");
@@ -3023,8 +3112,8 @@ async function openRelWeb() {
         const cssH = relCanvas._cssH || relCanvas.offsetHeight;
         relZoom = 1; relPanX = 0; relPanY = 0;
         const cx = cssW / 2, cy = cssH / 2, radius = Math.min(cx, cy) * 0.55;
-        relNodes = chars.map((c, i) => {
-            const angle = (2 * Math.PI * i) / chars.length - Math.PI / 2;
+        relNodes = mergedChars.map((c, i) => {
+            const angle = (2 * Math.PI * i) / mergedChars.length - Math.PI / 2;
             return {
                 id: c.id,
                 name: c.name,
@@ -3392,6 +3481,65 @@ function formatTimeAgo(ts) {
     return `${Math.floor(d / 3600)}h ago`;
 }
 
+function getDocumentScrollKey(id = currentDocId, type = currentDocType) {
+    return id ? `${type}_${id}` : '';
+}
+
+function rememberCurrentDocumentScroll() {
+    if (!currentDocId) return;
+    const key = getDocumentScrollKey();
+    if (!key || !editorWrapper) return;
+    documentScrollCache.set(key, editorWrapper.scrollTop || 0);
+}
+
+function restoreDocumentScroll(id, type) {
+    const key = getDocumentScrollKey(id, type);
+    const nextScrollTop = documentScrollCache.get(key) || 0;
+    requestAnimationFrame(() => {
+        if (editorWrapper) editorWrapper.scrollTop = nextScrollTop;
+    });
+}
+
+function loadStoredWebPositions(kind, projectId = currentProjectId) {
+    if (!projectId) return {};
+    try {
+        return JSON.parse(localStorage.getItem(getLocalKey(`${kind}_positions_${projectId}`)) || '{}');
+    } catch (e) {
+        return {};
+    }
+}
+
+function getStoredWebPosition(kind, id, projectId = currentProjectId) {
+    const stored = loadStoredWebPositions(kind, projectId);
+    const raw = stored[String(id)];
+    if (!raw) return null;
+    const x = Number(raw.x);
+    const y = Number(raw.y);
+    return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+}
+
+function storeWebPosition(kind, id, x, y, projectId = currentProjectId) {
+    if (!projectId || !Number.isFinite(x) || !Number.isFinite(y)) return;
+    const stored = loadStoredWebPositions(kind, projectId);
+    stored[String(id)] = { x, y };
+    try {
+        localStorage.setItem(getLocalKey(`${kind}_positions_${projectId}`), JSON.stringify(stored));
+    } catch (e) { }
+}
+
+function shouldShowDriveSyncFailureNotice(docId) {
+    const now = Date.now();
+    const docKey = `chapter_${docId}`;
+    const enoughTimePassed = now - lastDriveSyncErrorAt > 180000;
+    const differentDoc = lastDriveSyncErrorDocKey !== docKey;
+    if (differentDoc || enoughTimePassed) {
+        lastDriveSyncErrorAt = now;
+        lastDriveSyncErrorDocKey = docKey;
+        return true;
+    }
+    return false;
+}
+
 function startAutoSave() {
     stopAutoSave(); secondsUntilSave = 30;
     countdownTimer = setInterval(() => {
@@ -3442,9 +3590,15 @@ function updateLastSaved() {
 }
 
 function queueDriveSync(docId) {
+    if (pendingSyncPromise && pendingSyncDocId === docId) {
+        return pendingSyncPromise;
+    }
     pendingSync = false;
+    pendingSyncDocId = docId;
     pendingSyncPromise = api('POST', `/api/documents/${docId}/sync`)
         .then(() => {
+            lastDriveSyncErrorAt = 0;
+            lastDriveSyncErrorDocKey = '';
             if (currentDocId === docId && currentDocType === 'chapter') {
                 setSaveStatus('synced');
                 setTimeout(() => {
@@ -3456,13 +3610,29 @@ function queueDriveSync(docId) {
         })
         .catch(async e => {
             console.error('driveSync:', e);
+            const authExpired = /not logged in/i.test(e.message || '');
+            if (authExpired) {
+                await checkAuthState();
+                pendingSync = false;
+                if (currentDocId === docId && currentDocType === 'chapter') {
+                    setSaveStatus('saved');
+                }
+                if (shouldShowDriveSyncFailureNotice(docId)) {
+                    await showNotice('Your writing is saved locally, but Google Drive sync needs you to sign in again.', 'Drive Sign-In Needed', 'warning');
+                }
+                return;
+            }
             if (currentDocId === docId && currentDocType === 'chapter') {
                 setSaveStatus('error');
             }
-            await showNotice('Drive sync failed. Please try again after restarting the app.', 'Sync Failed', 'danger');
+            pendingSync = canAttemptDriveSync();
+            if (shouldShowDriveSyncFailureNotice(docId)) {
+                await showNotice('Drive sync failed. Your writing is still saved locally, but Drive could not be updated right now.', 'Sync Failed', 'danger');
+            }
         })
         .finally(() => {
             pendingSyncPromise = null;
+            pendingSyncDocId = null;
         });
     return pendingSyncPromise;
 }
@@ -3479,6 +3649,7 @@ function showEditor() {
 }
 
 function hideEditor() {
+    rememberCurrentDocumentScroll();
     stopAutoSave();
     welcomeScreen.classList.remove('hidden');
     editorWrapper.classList.remove('visible');

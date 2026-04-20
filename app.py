@@ -765,6 +765,16 @@ def sync_project_lore_relationships_to_drive(user, project):
     )
 
 
+def sync_document_to_drive(user, project, doc):
+    drive = get_drive_service(user)
+    folders = ensure_project_drive_structure(drive, user, project)
+    doc.drive_file_id = upsert_drive_text_file(
+        drive, doc.title, build_document_drive_content(doc), folders['chapters'], doc.drive_file_id
+    )
+    db.session.commit()
+    return doc.drive_file_id
+
+
 def sync_full_project_to_drive(user, project):
     drive = get_drive_service(user)
     folders = ensure_project_drive_structure(drive, user, project)
@@ -2102,7 +2112,7 @@ def sync_to_drive(doc_id):
     project = get_project_or_404(doc.project_id)
     try:
         had_drive_file = bool(doc.drive_file_id)
-        sync_full_project_to_drive(user, project)
+        sync_document_to_drive(user, project, doc)
         db.session.refresh(doc)
         action = 'updated' if had_drive_file and doc.drive_file_id else 'created'
         return jsonify({

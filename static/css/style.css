@@ -402,6 +402,7 @@ body { display: flex; height: 100vh; }
     display: none;
     flex-direction: column;
     padding-bottom: 48px;
+    scroll-padding-bottom: 9rem;
 }
 .editor-wrapper.visible { display: flex; }
 
@@ -427,10 +428,17 @@ body { display: flex; height: 100vh; }
 }
 
 .ql-editor {
-    padding: 48px 15% 400px !important;
+    padding: 48px 15% 14rem !important;
     min-height: 100%;
     caret-color: var(--accent-bright);
     color: var(--text-primary) !important;
+}
+
+.ql-editor::after {
+    content: '';
+    display: block;
+    height: 6lh;
+    pointer-events: none;
 }
 
 .ql-editor p {
